@@ -163,7 +163,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
           <div class="maintain-row">
             <div class="maintain-info">
               <strong>重建封面缩略图</strong>
-              <p>为 EPUB / MOBI / PDF 重新提取封面：封面压到 ≤48KB，缩略图 320×480 且 ≤40KB；TXT 保持渐变书脊占位。</p>
+              <p>为 EPUB / MOBI / PDF 重新提取封面并压到 ≤48KB；书架与详情共用同一份封面，TXT 保持渐变书脊占位。</p>
             </div>
             <n-button :disabled="!!job?.running" @click="runJob('covers')">
               <template #icon><image-plus :size="15" /></template>重建封面

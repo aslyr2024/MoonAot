@@ -36,7 +36,7 @@ flowchart TD
   G --> H["StartCoverBackfill"]
   H --> I["EnsureCover: CoverService.Extract"]
   I --> J["ThumbnailService.SaveExtractedCover\n封面 ≤48KB JPEG"]
-  J --> K["GetBookThumb\n320×480 ≤40KB"]
+  J --> K["书架直接使用封面\n≤48KB，不生成第二份缩略图"]
   I --> L["失败：写 .none 标记"]
   K --> M["每 1000 本 Changed → 书架刷新"]
 ```

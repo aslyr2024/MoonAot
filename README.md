@@ -70,6 +70,7 @@ dotnet publish MoonAot/MoonAot.csproj -c Release -r win-x64 -p:Platform=x64 -o p
 - [用户手册](docs/USER_MANUAL.md)
 - [构建与发布](docs/BUILD.md)
 - [第三方组件与许可](docs/THIRD_PARTY_NOTICES.md)
+- [更新记录](CHANGELOG.md)
 
 ## 数据目录
 
@@ -77,7 +78,7 @@ dotnet publish MoonAot/MoonAot.csproj -c Release -r win-x64 -p:Platform=x64 -o p
 |---|---|
 | `data/moonaot.db` | 书库、设置、笔记、进度、宏、收藏等（SQLite WAL） |
 | `data/covers/` | 提取/自定义封面（JPEG，≤48KB） |
-| `data/thumbs/` | 书架缩略图（320×480，≤40KB）、无封面标记、媒体缩略图 |
+| `data/thumbs/` | 无封面标记（`{id}.none`）、媒体/压缩包缩略图（`path/`）；书架直接使用 `covers` 封面 |
 | `data/cache/epub/` | 大小写不规范的 EPUB 修复副本（可删除，按需重建） |
 | `data/library/` | 网页上传的书籍副本 |
 | `data/media/`、`lyrics/`、`uploads/`、`logs/` | 媒体、歌词、上传临时文件、日志 |

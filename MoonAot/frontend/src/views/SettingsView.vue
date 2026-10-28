@@ -407,7 +407,7 @@ onBeforeUnmount(() => {
           <section class="panel settings-panel">
             <div class="panel-head"><h2><refresh-cw :size="15" />缓存维护</h2></div>
             <div class="maintain-row">
-              <div class="maintain-info"><strong>重建封面缩略图</strong><p>重新提取 EPUB / MOBI / PDF 封面，封面压到 ≤48KB，书架构图 320×480 JPEG（≤40KB）。</p></div>
+              <div class="maintain-info"><strong>重建封面</strong><p>重新提取 EPUB / MOBI / PDF 封面并压到 ≤48KB；书架与详情直接使用该封面，不再保存第二份缩略图。</p></div>
               <n-button :disabled="!!job?.running" @click="runJob('covers')">重建封面</n-button>
             </div>
             <div class="maintain-row">

@@ -49,7 +49,7 @@ flowchart LR
 | `Store/DbStore.cs` | 书籍/设置/笔记/进度/宏/收藏的 SQL 访问与内存版本号 |
 | `Store/MediaStore.cs` | 媒体进度、播放列表 |
 | `Services/LibraryService.cs` | 导入、元数据、封面/缩略图、后台维护任务 |
-| `Services/ThumbnailService.cs` | GDI+ 缩略图、封面压缩（≤48KB / ≤40KB） |
+| `Services/ThumbnailService.cs` | GDI+ 封面压缩（≤48KB）与媒体缩略图；书架直接复用封面 |
 | `Services/EpubRepairService.cs` | EPUB `container.xml` 路径大小写修复缓存 |
 | `Services/ImageScanService.cs` | 图片文件夹索引、后台扫描、分页 |
 | `Services/Zim/*` | ZIM 头/条目/簇解析、zstd/xz、OpenCC 简繁转换 |
@@ -72,7 +72,7 @@ flowchart LR
 | `/reader.html` | Readest 阅读器入口（`?ids=hash`） |
 | `/book/{id}` | 原始书籍流，支持 HTTP Range；EPUB 会先走兼容修复 |
 | `/txt/{id}`、`/md/{id}` | TXT/MD 解码为 UTF-8 |
-| `/cover/{id}`、`/thumb/{id}` | 封面与书架缩略图 |
+| `/cover/{id}`、`/thumb/{id}` | 封面（≤48KB，书架/详情共用；`/thumb` 为兼容别名） |
 | `/media`、`/image` | 音视频/图片流（支持 Range） |
 | `/thumbpath` | 任意文件缩略图（媒体/压缩包） |
 | `/api/library/page` | 书架分页（支持 `count=0` 跳过 COUNT） |
@@ -99,7 +99,7 @@ flowchart LR
 ## 6. 性能设计
 
 1. **书架**：120 本/页，虚拟滚动，翻页跳过 COUNT；最近阅读使用表达式索引，深偏移稳定在 10ms 级。
-2. **封面**：导入/启动后台提取，压缩到 ≤48KB；书架缩略图 320×480、≤40KB；滚动不再触发书籍解析。
+2. **封面**：导入/启动后台提取，压缩到 ≤48KB；书架与详情共用同一份封面，不再保存第二份缩略图；滚动不触发书籍解析。
 3. **索引**：NTFS 优先读 MFT；USN Journal 实时增量；非 NTFS 递归扫描 + FileSystemWatcher；移动盘热插拔。
 4. **图片**：有全盘索引时直接枚举 EntryStore 子树，否则回退文件系统扫描。
 5. **阅读器**：禁用远程字体样式；EPUB 首次打开时按需生成容器修复副本并缓存。

@@ -200,8 +200,9 @@ export const api = {
 
 // ---------- URL 构造 ----------
 export const urls = {
+  // 书架/详情统一使用封面主文件（≤48KB），不再单独保存 320×480 缩略图
   thumb: (item: { hash: string; coverVersion?: number }) =>
-    `/thumb/${encodeURIComponent(item.hash)}?v=${item.coverVersion ?? 0}`,
+    `/cover/${encodeURIComponent(item.hash)}?v=${item.coverVersion ?? 0}`,
   cover: (hash: string, v = 0) => `/cover/${encodeURIComponent(hash)}?v=${v}`,
   defaultCover: () => `/api/defaultcover`,
   thumbPath: (path: string, w = 320, h = 320) =>

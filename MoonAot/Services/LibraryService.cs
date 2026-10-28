@@ -545,17 +545,21 @@ public sealed class LibraryService
                     catch { }
                 }
 
+                // 书架直接使用封面主文件，旧版书籍缩略图全部清理（保留 .none 标记与 thumbs/path 媒体缩略图）
+                long freed = 0;
                 foreach (var f in Directory.EnumerateFiles(DbStore.Instance.ThumbsDir, "*.jpg", SearchOption.TopDirectoryOnly))
                 {
                     try
                     {
-                        if (new FileInfo(f).Length <= ThumbnailService.MaxThumbBytes) continue;
-                        if (ThumbnailService.RecompressThumbInPlace(f)) thumbs++;
+                        var len = new FileInfo(f).Length;
+                        File.Delete(f);
+                        freed += len;
+                        thumbs++;
                     }
                     catch { }
                 }
                 if (compressed > 0 || thumbs > 0)
-                    Log.Info($"封面体积维护完成：封面 {compressed} 张，缩略图 {thumbs} 张");
+                    Log.Info($"封面体积维护完成：封面 {compressed} 张；清理旧书籍缩略图 {thumbs} 张，释放 {freed / 1024 / 1024}MB");
             }
             catch (Exception ex) { Log.Warn("封面体积维护失败: " + ex.Message); }
             finally

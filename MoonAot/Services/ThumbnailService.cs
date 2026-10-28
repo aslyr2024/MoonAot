@@ -9,16 +9,12 @@ using MoonAot.Store;
 namespace MoonAot.Services;
 
 /// <summary>
-/// 封面缩略图服务（GDI+，NativeAOT 已验证可用）。
-/// 书架只加载 400×600 的 JPEG 缩略图，避免 498MB 原图同时解码导致卡死；
-/// 缩略图按需生成并落盘，之后直接命中磁盘缓存。
+/// 封面与图片缩略图服务（GDI+，NativeAOT 已验证）。
+/// 书架直接使用封面主文件（≤48KB），不再单独保存 320×480 缩略图；
+/// 媒体库仍按路径生成小缩略图。
 /// </summary>
 public static class ThumbnailService
 {
-    public const int ThumbWidth = 320;
-    public const int ThumbHeight = 480;
-    /// <summary>缩略图体积上限（字节）。</summary>
-    public const int MaxThumbBytes = 40 * 1024;
     /// <summary>封面体积上限（字节）：48KB，确保按十进制也低于 50KB。</summary>
     public const int MaxCoverBytes = 48 * 1024;
     /// <summary>无封面标记版本；旧版迁移过来的 "1" 标记会自动失效重试。</summary>
@@ -35,54 +31,15 @@ public static class ThumbnailService
     }
 
     /// <summary>
-    /// 取某本书的缩略图；没有封面时返回 null（前端绘制渐变占位）。
-    /// 首次请求会提取封面、缩放并写盘，之后走缓存。
+    /// 取某本书的封面文件；书架与详情共用同一份 ≤48KB 主封面，没有封面时返回 null。
+    /// 不会在这里提取封面（避免滚动书架时逐本解析电子书）。
     /// </summary>
     public static string? GetBookThumb(BookRecord book)
     {
-        var outPath = DbStore.Instance.ThumbPath(book.Id);
-        if (File.Exists(outPath))
-        {
-            var len = new FileInfo(outPath).Length;
-            if (len > 256 && len <= MaxThumbBytes) return outPath;
-            try { File.Delete(outPath); } catch { }
-        }
-        if (HasValidNoCoverMarker(book.Id)) return null;
-
-        if (!Gate.Wait(8000)) return null;
-        try
-        {
-            if (File.Exists(outPath))
-            {
-                var len = new FileInfo(outPath).Length;
-                if (len > 256 && len <= MaxThumbBytes) return outPath;
-                try { File.Delete(outPath); } catch { }
-            }
-            if (HasValidNoCoverMarker(book.Id)) return null;
-
-            var cover = ResolveCover(book);
-            if (cover == null || !File.Exists(cover))
-            {
-                TryWriteMarker(book.Id);
-                return null;
-            }
-            var ok = CreateCoverThumb(cover, outPath);
-            if (!ok)
-            {
-                TryWriteMarker(book.Id);
-                return null;
-            }
-            return outPath;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"生成缩略图失败 {book.Id}: {ex.Message}");
-            return null;
-        }
-        finally
-        {
-            Gate.Release();
-        }
+        var cover = DbStore.Instance.GetCoverFile(book.Id);
+        if (!string.IsNullOrEmpty(cover) && File.Exists(cover)) return cover;
+        if (!string.IsNullOrEmpty(book.CoverFile) && File.Exists(book.CoverFile)) return book.CoverFile;
+        return null;
     }
 
     private static bool HasValidNoCoverMarker(string id)
@@ -110,74 +67,8 @@ public static class ThumbnailService
     /// <summary>是否已有“无封面”标记（重建封面会清除）。</summary>
     public static bool HasNoCoverMarker(string id) => HasValidNoCoverMarker(id);
 
-    /// <summary>解析封面：提取封面 → 手动封面 → 默认封面。</summary>
-    private static string? ResolveCover(BookRecord book)
-    {
-        var extracted = DbStore.Instance.GetCoverFile(book.Id);
-        if (extracted != null) return extracted;
-
-        if (!string.IsNullOrEmpty(book.CoverFile) && File.Exists(book.CoverFile)) return book.CoverFile;
-
-        if (File.Exists(book.FilePath) && book.Format is BookFormatEx.Epub or BookFormatEx.Pdf or BookFormatEx.Mobi or BookFormatEx.Azw3)
-        {
-            try
-            {
-                var data = CoverService.Extract(book.FilePath, book.Format, out var ext);
-                if (data != null && data.Length > 256)
-                {
-                    var path = SaveExtractedCover(book.Id, data, ext);
-                    if (path == null) return null;
-                    DbStore.Instance.UpdateBook(book.Id, b =>
-                    {
-                        b.CoverFile = path;
-                        b.CoverExt = Path.GetExtension(path).ToLowerInvariant();
-                        b.CoverVersion++;
-                    });
-                    return path;
-                }
-                TryWriteMarker(book.Id);
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"提取封面失败 {book.Id}: {ex.Message}");
-            }
-        }
-
-        // 缺省封面不逐本生成缩略图（10 万本会复制出 2GB 文件）；
-        // 前端对无封面的 EPUB/PDF/MOBI 直接复用同一个 /api/defaultcover 地址。
-        return null;
-    }
-
-    /// <summary>把封面写成 400×600 居中裁切的 JPEG 缩略图。</summary>
-    public static bool CreateCoverThumb(string sourcePath, string outPath)
-    {
-        using var img = LoadImage(sourcePath);
-        if (img == null) return false;
-        using var bmp = new Bitmap(ThumbWidth, ThumbHeight, PixelFormat.Format24bppRgb);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.HighQuality;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.CompositingQuality = CompositingQuality.HighQuality;
-            g.Clear(Color.FromArgb(24, 26, 32));
-
-            double sx = (double)ThumbWidth / img.Width;
-            double sy = (double)ThumbHeight / img.Height;
-            double scale = Math.Max(sx, sy);
-            int w = (int)Math.Ceiling(img.Width * scale);
-            int h = (int)Math.Ceiling(img.Height * scale);
-            int x = (ThumbWidth - w) / 2;
-            int y = (ThumbHeight - h) / 2;
-            using var ia = new ImageAttributes();
-            g.DrawImage(img, new Rectangle(x, y, w, h), 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, ia);
-        }
-        SaveJpegMax(bmp, outPath, MaxThumbBytes);
-        return true;
-    }
-
     /// <summary>
-    /// 保存从书里提取的封面：优先转成 ≤50KB 的 JPEG；GDI+ 无法解码的格式（如 AVIF）保留原始字节。
+    /// 保存从书里提取的封面：优先转成 ≤48KB 的 JPEG；GDI+ 无法解码的格式（如 AVIF）保留原始字节。
     /// 返回最终封面路径。
     /// </summary>
     public static string? SaveExtractedCover(string bookId, byte[] data, string ext)
@@ -229,37 +120,12 @@ public static class ThumbnailService
         }
     }
 
-    /// <summary>把磁盘上的图片压缩为 ≤50KB 的 JPEG；源格式无法解码时返回 false。</summary>
+    /// <summary>把磁盘上的图片压缩为 ≤48KB 的 JPEG；源格式无法解码时返回 false。</summary>
     public static bool CompressFileToJpeg(string sourcePath, string outPath)
     {
         using var img = LoadImage(sourcePath);
         if (img == null) return false;
         return StoreCoverJpeg(img, outPath);
-    }
-
-    /// <summary>就地把超大缩略图重新压到上限内（启动维护用）。</summary>
-    public static bool RecompressThumbInPlace(string path)
-    {
-        try
-        {
-            using var img = LoadImage(path);
-            if (img == null) return false;
-            using var bmp = new Bitmap(ThumbWidth, ThumbHeight, PixelFormat.Format24bppRgb);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SmoothingMode.HighQuality;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.Clear(Color.FromArgb(24, 26, 32));
-                double scale = Math.Max((double)ThumbWidth / img.Width, (double)ThumbHeight / img.Height);
-                int w = (int)Math.Ceiling(img.Width * scale);
-                int h = (int)Math.Ceiling(img.Height * scale);
-                g.DrawImage(img, new Rectangle((ThumbWidth - w) / 2, (ThumbHeight - h) / 2, w, h));
-            }
-            SaveJpegMax(bmp, path, MaxThumbBytes);
-            return true;
-        }
-        catch { return false; }
     }
 
     /// <summary>按质量/尺寸逐级压缩，直到落盘体积不超过 maxBytes。</summary>

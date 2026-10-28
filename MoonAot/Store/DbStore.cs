@@ -1374,12 +1374,35 @@ WHERE n.deleted_at IS NULL
         try
         {
             var files = Directory.GetFiles(CoversDir);
-            if (files.Length == 0) return;
             lock (Database.Instance.SyncRoot)
             {
                 using var cn = Database.Instance.Open();
                 using var tx = cn.BeginTransaction();
-                int n = 0;
+                int n = 0, cleared = 0;
+
+                // 外部清理过 covers 目录时，把指向已不存在文件的记录清空，
+                // 让书架显示占位/缺省封面，并允许后台重新提取。
+                var stale = new List<string>();
+                using (var q = Cmd(cn, "SELECT id, cover_file FROM books WHERE cover_file IS NOT NULL AND cover_file <> '';", tx))
+                using (var r = q.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var p = r.IsDBNull(1) ? null : r.GetString(1);
+                        if (string.IsNullOrEmpty(p) || !File.Exists(p)) stale.Add(r.GetString(0));
+                    }
+                }
+                if (stale.Count > 0)
+                {
+                    using var clear = Cmd(cn, "UPDATE books SET cover_file=NULL, cover_ext=NULL WHERE id=$id;", tx);
+                    var ci = clear.Parameters.Add("$id", SqliteType.Text);
+                    foreach (var id in stale)
+                    {
+                        ci.Value = id;
+                        cleared += clear.ExecuteNonQuery();
+                    }
+                }
+
                 using var up = Cmd(cn, "UPDATE books SET cover_file=$p, cover_ext=$e WHERE id=$id AND (cover_file IS NULL OR cover_file='');", tx);
                 var pp = up.Parameters.Add("$p", SqliteType.Text);
                 var pe = up.Parameters.Add("$e", SqliteType.Text);
@@ -1400,6 +1423,7 @@ WHERE n.deleted_at IS NULL
                 }
                 tx.Commit();
                 if (n > 0) Log.Info($"封面索引: {n} 本");
+                if (cleared > 0) Log.Info($"清理失效封面引用: {cleared} 本");
             }
         }
         catch (Exception ex) { Log.Warn("扫描封面目录失败: " + ex.Message); }
