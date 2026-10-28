@@ -1,0 +1,34 @@
+# Build outputs
+**/bin/
+**/obj/
+**/publish/
+MoonAot/frontend/dist/
+MoonAot/frontend/node_modules/
+dist/
+Release/
+*.zip
+
+# Runtime data (must never be committed)
+MoonAot/data/
+MoonAot/data_*/
+MoonAot/publish/data/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# IDE
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Temp (repo root only)
+/_*

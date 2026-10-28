@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>百科 · ZIM 阅读器</title>
+<style>
+  :root{
+    --bg:#ffffff; --bar:#f7f7f9; --line:#e5e5ea; --text:#1c1c1e; --sub:#8a8a8e;
+    --accent:#2f6fed; --hover:#eef2fb;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{height:100%;margin:0}
+  body{font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);
+       background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
+
+  /* 顶栏 */
+  #bar{height:48px;flex:0 0 48px;display:flex;align-items:center;gap:6px;padding:0 10px;
+       background:var(--bar);border-bottom:1px solid var(--line)}
+  .btn{border:0;background:transparent;border-radius:8px;height:32px;min-width:32px;padding:0 10px;
+       cursor:pointer;color:var(--text);font-size:14px}
+  .btn:hover{background:var(--hover)}
+  .btn:disabled{opacity:.35;cursor:default;background:transparent}
+  #searchWrap{position:relative;flex:1;max-width:640px;margin:0 8px}
+  #q{width:100%;height:32px;border:1px solid var(--line);border-radius:16px;padding:0 14px;
+     background:#fff;color:var(--text);outline:none;font-size:14px}
+  #q:focus{border-color:var(--accent)}
+  #sug{position:absolute;top:36px;left:0;right:0;background:#fff;border:1px solid var(--line);
+       border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.12);max-height:60vh;overflow:auto;display:none;z-index:20}
+  #sug div{padding:8px 14px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sug div:hover,#sug div.sel{background:var(--hover)}
+  #title{color:var(--sub);font-size:13px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* 内容区 */
+  #view{flex:1;border:0;width:100%;background:#fff}
+  #empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--sub)}
+  #empty h1{font-size:22px;color:var(--text);margin:0}
+  #empty .big{font-size:56px}
+  #recent{margin-top:6px;display:flex;flex-direction:column;gap:6px;align-items:center}
+  #recent a{color:var(--accent);cursor:pointer;text-decoration:none;font-size:13px}
+  #recent a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <button class="btn" id="back"  title="后退 (Alt+←)">←</button>
+  <button class="btn" id="fwd"   title="前进 (Alt+→)">→</button>
+  <button class="btn" id="home"  title="首页">⌂</button>
+  <button class="btn" id="rand"  title="随机条目">🎲</button>
+  <button class="btn" id="conv"  title="简繁切换（当前：简体）">简</button>
+  <div id="searchWrap">
+    <input id="q" placeholder="搜索百科条目标题…（回车打开第一条）" autocomplete="off" spellcheck="false">
+    <div id="sug"></div>
+  </div>
+  <span id="title"></span>
+</div>
+
+<div id="empty">
+  <div class="big">📚</div>
+  <h1>尚未打开百科文件</h1>
+  <div>点击窗口左上角「打开 ZIM 文件」，选择本地 <b>.zim</b> 百科（如中文维基百科离线包）</div>
+  <div id="recent"></div>
+</div>
+
+<iframe id="view" hidden referrerpolicy="no-referrer"></iframe>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const view = $('#view'), empty = $('#empty'), sug = $('#sug'), q = $('#q');
+
+let info = null;              // 当前 ZIM 信息
+let hist = [], hpos = -1;     // 自维护的浏览历史（iframe 跨文档 history 不可靠）
+let sugItems = [], sugSel = -1;
+
+/* ---------- 基础 ---------- */
+const api = (p) => fetch(p).then(r => r.json());
+const contentUrl = path => '/zim/' + path.split('/').map(encodeURIComponent).join('/');
+
+let lastOpen = false;   // 上一次轮询到的 open 状态，用于检测变化
+
+/* ---------- 简繁切换 ---------- */
+// convMode: 's' 显示简体（对原始繁体做 t2s）/ 't' 显示繁体（使用原始）
+let convMode = 's';
+try { convMode = localStorage.getItem('zimConv') || 's'; } catch (e) {}
+function updateConvBtn() {
+  const b = $('#conv');
+  b.textContent = convMode === 's' ? '简' : '繁';
+  b.title = '简繁切换（当前：' + (convMode === 's' ? '简体' : '繁体') + '）';
+}
+// 单条文本转换（用于标题等零散文本）
+async function convertText(text, dir) {
+  if (!text) return text;
+  try {
+    const r = await fetch('/zimapi/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dir, texts: [text] }) });
+    const j = await r.json();
+    if (j && j.texts && j.texts.length) return j.texts[0];
+  } catch (e) { }
+  return text;
+}
+// 收集文档内可见文本节点，并保存原始文本快照（__orig），供切换时反复转换
+function snapshotTextNodes(doc) {
+  if (!doc || !doc.body) return [];
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      const p = n.parentElement;
+      if (!p) return NodeFilter.FILTER_REJECT;
+      const tag = p.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE') return NodeFilter.FILTER_REJECT;
+      if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const arr = []; let n;
+  while ((n = walker.nextNode())) { if (n.__orig === undefined) n.__orig = n.nodeValue; arr.push(n); }
+  return arr;
+}
+// 对整篇正文做简繁转换（始终基于原始文本 __orig，避免累积误差）
+async function applyConv(doc) {
+  if (!doc || !doc.body) return;
+  const nodes = snapshotTextNodes(doc);
+  if (!nodes.length) return;
+  if (convMode === 's') {
+    const texts = nodes.map(x => x.__orig);
+    try {
+      const r = await fetch('/zimapi/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dir: 't2s', texts }) });
+      const j = await r.json();
+      if (j && j.texts && j.texts.length === nodes.length)
+        nodes.forEach((x, i) => { x.nodeValue = j.texts[i]; });
+    } catch (e) { }
+  } else {
+    // 繁体模式：还原为原始文本（维基中文 ZIM 多为繁体）
+    nodes.forEach(x => { x.nodeValue = x.__orig; });
+  }
+}
+
+async function refresh(forceGoHome = false) {
+  try {
+    info = await api('/zimapi/info');
+  } catch (e) {
+    console.warn('zimapi/info failed', e);
+    return;
+  }
+  lastOpen = info.open;
+
+  if (!info.open) {
+    empty.hidden = false;
+    view.hidden = true;
+    $('#title').textContent = '';
+    const box = $('#recent'); box.innerHTML = '';
+    (info.recent || []).forEach(p => {
+      const a = document.createElement('a');
+      a.textContent = '最近：' + p;
+      a.onclick = async () => {
+        try {
+          const r = await api('/zimapi/open?path=' + encodeURIComponent(p));
+          if (r.ok) { await refresh(true); } else alert('打开失败：' + r.error);
+        } catch (e) { alert('打开失败：' + e); }
+      };
+      box.appendChild(a);
+    });
+    return;
+  }
+
+  // 已打开：确保空状态隐藏、iframe 显示
+  empty.hidden = true;
+  view.hidden = false;
+  document.title = info.name + ' · 百科';
+  if ((hpos < 0 || forceGoHome) && info.mainPath) go(info.mainPath);
+}
+
+/* 轮询兜底：即使 C# 侧的 JS 桥调用失败，页面也能在 1 秒内自动感知到 ZIM 已打开 */
+setInterval(async () => {
+  try {
+    const newInfo = await api('/zimapi/info');
+    if (newInfo.open !== lastOpen) await refresh();
+    // 保险：若后端已 open 但 empty 仍显示，强制刷新
+    else if (newInfo.open && !empty.hidden) await refresh();
+  } catch (e) { /* 静默忽略，避免控制台刷屏 */ }
+}, 800);
+
+/* ---------- 导航 ---------- */
+function go(path, push = true) {
+  if (!path) return;
+  if (push) { hist = hist.slice(0, hpos + 1); hist.push(path); hpos = hist.length - 1; }
+  view.src = contentUrl(path);
+  updateNav();
+}
+function updateNav() {
+  $('#back').disabled = hpos <= 0;
+  $('#fwd').disabled  = hpos >= hist.length - 1;
+}
+$('#back').onclick = () => { if (hpos > 0) { hpos--; view.src = contentUrl(hist[hpos]); updateNav(); } };
+$('#fwd').onclick  = () => { if (hpos < hist.length - 1) { hpos++; view.src = contentUrl(hist[hpos]); updateNav(); } };
+$('#home').onclick = () => info && info.mainPath && go(info.mainPath);
+$('#rand').onclick = async () => { const r = await api('/zimapi/random'); if (r.path) go(r.path); };
+
+/* iframe 内部点击链接（同源，可直接读取地址）后同步历史与标题 */
+view.addEventListener('load', async () => {
+  let path = '';
+  try {
+    const u = new URL(view.contentWindow.location.href);
+    if (u.pathname.startsWith('/zim/')) path = decodeURIComponent(u.pathname.slice(5));
+  } catch (e) { /* 跨源（外链）忽略 */ }
+
+  if (path && path !== hist[hpos]) {
+    hist = hist.slice(0, hpos + 1); hist.push(path); hpos = hist.length - 1;
+    updateNav();
+  }
+  try {
+    let ttl = view.contentDocument.title || path;
+    if (convMode === 's') ttl = await convertText(ttl, 't2s');
+    $('#title').textContent = ttl;
+    hookExternalLinks(view.contentDocument);
+    injectStyle(view.contentDocument);
+  } catch (e) {}
+  // 简繁转换（始终基于原始文本，切换不累积误差）
+  await applyConv(view.contentDocument);
+});
+
+/* 站外链接（https://zh.wikipedia.org/...）不在离线包内，交给系统浏览器；同时支持 Alt+方向键 */
+function hookExternalLinks(doc) {
+  doc.addEventListener('click', ev => {
+    const a = ev.target.closest && ev.target.closest('a[href]');
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    if (/^(https?:)?\/\//i.test(href)) { ev.preventDefault(); window.open(href, '_blank'); }
+  }, true);
+  doc.addEventListener('keydown', onKey);
+}
+/* 让长条目在窄窗口里也不至于溢出 */
+function injectStyle(doc) {
+  if (!doc.head || doc.getElementById('__mr_zim_css')) return;
+  const s = doc.createElement('style');
+  s.id = '__mr_zim_css';
+  s.textContent = 'img{max-width:100%;height:auto}body{overflow-x:hidden}';
+  doc.head.appendChild(s);
+}
+
+/* ---------- 搜索建议 ---------- */
+let timer = null;
+q.addEventListener('input', () => {
+  clearTimeout(timer);
+  const text = q.value.trim();
+  if (!text) { hideSug(); return; }
+  timer = setTimeout(async () => {
+    const list = await api('/zimapi/search?q=' + encodeURIComponent(text) + '&limit=30');
+    showSug(list);
+  }, 120);
+});
+function showSug(list) {
+  sugItems = list; sugSel = -1;
+  if (!list.length) { hideSug(); return; }
+  sug.innerHTML = '';
+  list.forEach((it, i) => {
+    const d = document.createElement('div');
+    d.textContent = it.title;
+    d.onclick = () => { hideSug(); q.value = it.title; go(it.path); };
+    sug.appendChild(d);
+  });
+  sug.style.display = 'block';
+}
+function hideSug() { sug.style.display = 'none'; sugItems = []; sugSel = -1; }
+
+q.addEventListener('keydown', e => {
+  if (sug.style.display === 'block' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    sugSel += e.key === 'ArrowDown' ? 1 : -1;
+    sugSel = Math.max(0, Math.min(sugItems.length - 1, sugSel));
+    [...sug.children].forEach((c, i) => c.classList.toggle('sel', i === sugSel));
+    sug.children[sugSel].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    const it = sugItems[sugSel >= 0 ? sugSel : 0];
+    if (it) { hideSug(); q.value = it.title; go(it.path); q.blur(); }
+  } else if (e.key === 'Escape') hideSug();
+});
+document.addEventListener('click', e => { if (!e.target.closest('#searchWrap')) hideSug(); });
+
+/* ---------- 快捷键 ---------- */
+function onKey(e) {
+  if (e.altKey && e.key === 'ArrowLeft')  { e.preventDefault(); $('#back').click(); }
+  if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); $('#fwd').click(); }
+  if (e.ctrlKey && (e.key === 'f' || e.key === 'k')) { e.preventDefault(); q.focus(); q.select(); }
+}
+document.addEventListener('keydown', onKey);
+
+/* 简繁切换按钮 */
+$('#conv').onclick = () => {
+  convMode = convMode === 's' ? 't' : 's';
+  try { localStorage.setItem('zimConv', convMode); } catch (e) {}
+  updateConvBtn();
+  applyConv(view.contentDocument);
+};
+
+/* 供 C# 侧（打开文件后）调用刷新 */
+window.zimRefresh = () => { hpos = -1; hist = []; refresh(); };
+updateConvBtn();
+refresh();
+</script>
+</body>
+</html>

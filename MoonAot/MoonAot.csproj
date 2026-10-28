@@ -1,0 +1,88 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<PublishAot>true</PublishAot>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<IsAotCompatible>true</IsAotCompatible>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<Platforms>x64</Platforms>
+		<ApplicationIcon>jingxin_reading.ico</ApplicationIcon>
+		<InvariantGlobalization>false</InvariantGlobalization>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<RootNamespace>MoonAot</RootNamespace>
+		<!-- 前端源码与依赖不参与 .NET 编译/发布 -->
+		<DefaultItemExcludes>$(DefaultItemExcludes);frontend/**</DefaultItemExcludes>
+		<InvariantGlobalization>false</InvariantGlobalization>
+		<!-- 本项目仅面向 Windows（WebView2/GDI+），抑制平台可用性提示 -->
+		<NoWarn>$(NoWarn);CA1416</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- GB18030 编解码已随 .NET 运行时提供，无需包引用 -->
+		<!-- 封面/缩略图缩放（Windows GDI+，已通过 NativeAOT 验证） -->
+		<PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+		<!-- 嵌入式数据库：原生 SQL，无 EF/FreeSql；NativeAOT 已实测 -->
+		<PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+		<PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+		<!-- 百科 ZIM：zstd/xz 解压与简繁转换 -->
+		<PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+		<PackageReference Include="SharpCompress" Version="0.50.4" />
+		<PackageReference Include="OpenCC.NET" Version="1.0.1" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\WebView2Aot-main\WebView2\WebView2.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Remove="runtimes\win-arm64\native\WebView2Loader.dll" />
+		<None Remove="runtimes\win-x64\native\WebView2Loader.dll" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="runtimes\win-arm64\native\WebView2Loader.dll">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</EmbeddedResource>
+		<EmbeddedResource Include="runtimes\win-x64\native\WebView2Loader.dll">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</EmbeddedResource>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="Assets\**\*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Using Include="DirectN" />
+		<Using Include="DirectN.Extensions" />
+		<Using Include="DirectN.Extensions.Com" />
+		<Using Include="DirectN.Extensions.Utilities" />
+		<Using Include="WebView2" />
+		<Using Include="WebView2.Utilities" />
+		<Using Include="System" />
+		<Using Include="System.Collections.Concurrent" />
+		<Using Include="System.Collections.Generic" />
+		<Using Include="System.ComponentModel" />
+		<Using Include="System.Diagnostics.CodeAnalysis" />
+		<Using Include="System.Globalization" />
+		<Using Include="System.IO" />
+		<Using Include="System.Linq" />
+		<Using Include="System.Reflection" />
+		<Using Include="System.Runtime.Versioning" />
+		<Using Include="System.Runtime.CompilerServices" />
+		<Using Include="System.Runtime.InteropServices" />
+		<Using Include="System.Text.Json" />
+		<Using Include="System.Text.Json.Serialization" />
+		<Using Include="System.Text.Json.Serialization.Metadata" />
+		<Using Include="System.Threading" />
+		<Using Include="System.Threading.Tasks" />
+	</ItemGroup>
+
+</Project>

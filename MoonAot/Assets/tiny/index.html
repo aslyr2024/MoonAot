@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyEverything</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="crt"></div>
+
+  <header id="topbar">
+    <div class="logo">TINY<i>//</i>EVERYTHING</div>
+    <div class="search-wrap">
+      <span class="prompt">&gt;_</span>
+      <input id="q" type="text" autocomplete="off" spellcheck="false"
+             placeholder='搜索… 支持 * ? 通配 | 或  ! 非  "短语"  ext: size: dm: path: parent: folder: file: regex:'>
+    </div>
+    <button id="btn-rescan" class="neon-btn" title="重建全部索引">⟳ 重建</button>
+    <button id="btn-openall" class="neon-btn" title="把搜索到的所有媒体文件加入播放列表并用内置播放器打开">▶ 打开所有</button>
+    <button id="btn-settings" class="neon-btn" title="设置">⚙ 设置</button>
+  </header>
+
+  <div id="thead">
+    <div class="th c-name"  data-sort="name">名称<span class="arr"></span></div>
+    <div class="th c-path"  data-sort="path">路径<span class="arr"></span></div>
+    <div class="th c-size"  data-sort="size">大小<span class="arr"></span></div>
+    <div class="th c-type"  data-sort="type">类型<span class="arr"></span></div>
+    <div class="th c-date"  data-sort="date">修改时间<span class="arr"></span></div>
+  </div>
+
+  <div id="results"><div id="rows"></div></div>
+
+  <footer id="statusbar">
+    <span id="st-total" class="cell"></span>
+    <span id="st-match" class="cell"></span>
+    <span id="st-time" class="cell"></span>
+    <span class="spacer"></span>
+    <span id="st-drives" class="cell"></span>
+  </footer>
+
+  <div id="ctx-menu" class="hidden">
+    <div class="mi" data-act="open">打开</div>
+    <div class="mi" data-act="reveal">打开所在位置</div>
+    <div class="mi sep"></div>
+    <div class="mi" data-act="copy-path">复制完整路径</div>
+    <div class="mi" data-act="copy-name">复制文件名</div>
+  </div>
+
+  <div id="settings-mask" class="hidden"></div>
+  <aside id="settings-drawer" class="hidden">
+    <h2>设置 <span class="blink">▮</span></h2>
+    <section>
+      <h3>索引驱动器（不勾选 = 全部）</h3>
+      <div id="drive-list"></div>
+    </section>
+    <section>
+      <h3>排除文件夹（每行一个完整路径）</h3>
+      <textarea id="ta-exclude" rows="5" spellcheck="false"></textarea>
+    </section>
+    <section>
+      <h3>指定扫描文件夹（留空 = 全盘；每行一个）</h3>
+      <textarea id="ta-include" rows="4" spellcheck="false"></textarea>
+    </section>
+    <section>
+      <h3>定时全盘重扫（NTFS 盘有实时监控，一般无需开启）</h3>
+      <select id="sel-rescan-interval">
+        <option value="0">关闭</option>
+        <option value="6">每 6 小时</option>
+        <option value="12">每 12 小时</option>
+        <option value="24">每 24 小时</option>
+        <option value="72">每 3 天</option>
+        <option value="168">每 7 天</option>
+      </select>
+    </section>
+    <div class="drawer-actions">
+      <button id="btn-save-settings" class="neon-btn primary">保存并重建索引</button>
+      <button id="btn-close-settings" class="neon-btn">关闭</button>
+    </div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>
