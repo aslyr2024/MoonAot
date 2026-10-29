@@ -716,6 +716,23 @@ FROM books;
         }
     }
 
+    /// <summary>按书架当前筛选与排序返回图书 ID 顺序（阅读器上下键切书用）。</summary>
+    public string[] ReadingOrder(LibraryQuery q)
+    {
+        lock (Database.Instance.SyncRoot)
+        {
+            using var cn = Database.Instance.Open();
+            var (where, args) = BuildWhere(q);
+            var order = BuildOrder(q);
+            using var cmd = Cmd(cn, "SELECT id FROM books " + where + " ORDER BY " + order + ";");
+            foreach (var (n, v) in args) P(cmd, n, v);
+            using var r = cmd.ExecuteReader();
+            var list = new List<string>();
+            while (r.Read()) list.Add(r.GetString(0));
+            return list.ToArray();
+        }
+    }
+
     public BookRecord[] Snapshot()
     {
         lock (Database.Instance.SyncRoot)
@@ -1501,7 +1518,10 @@ WHERE n.deleted_at IS NULL
                     ComicWidth = Empty(S("media_comic_width"), "default"),
                     ComicAutoPage = B("media_comic_auto_page"),
                     RecursiveImages = B("media_recursive_images"),
-                    MusicBackgroundSeconds = (int)Math.Clamp(L("media_music_background_seconds"), 1, 60),
+                    MusicBackgroundSeconds = Seconds(D("media_music_background_seconds"), 8),
+                    MusicBackgroundRandom = L("media_music_bg_random") != 0,
+                    MusicBackgroundFit = Empty(S("media_music_bg_fit"), "cover"),
+                    MusicBackgroundBlur = (int)Math.Clamp(L("media_music_bg_blur"), 0, 10),
                     MusicShowLyrics = B("media_music_show_lyrics"),
                     VideoAutoResume = B("media_video_auto_resume"),
                     ImageTransition = Empty(S("media_image_transition"), "fade"),
@@ -1560,6 +1580,8 @@ WHERE n.deleted_at IS NULL
 
     private static double SlideSeconds(double v) => v <= 0 ? 5 : Math.Clamp(v, 0.1, 60);
 
+    private static double Seconds(double v, double fallback) => v <= 0 ? fallback : Math.Clamp(v, 0.1, 60);
+
     public void UpdateAppSettings(Action<AppSettings> mutate) => UpdateAppSettingsCore(mutate);
 
     public void UpdateAppSettingsDeferred(Action<AppSettings> mutate) => UpdateAppSettingsCore(mutate);
@@ -1599,7 +1621,8 @@ UPDATE app_settings SET
  media_music_volume=$m12, media_music_mode=$m13, media_music_tab=$m14,
  media_video_volume=$m15, media_video_show_list=$m16,
  media_music_bg_folder=$m17, media_music_bg_index=$m18, media_image_last_folder=$m19,
- media_image_fit=$m20, media_image_bgm_folder=$m21, media_image_bgm_index=$m22
+ media_image_fit=$m20, media_image_bgm_folder=$m21, media_image_bgm_index=$m22,
+ media_music_bg_random=$m23, media_music_bg_fit=$m24, media_music_bg_blur=$m25
 WHERE id=1;
 """, tx))
         {
@@ -1644,6 +1667,9 @@ WHERE id=1;
             P(cmd, "$m20", m.ImageFitMode is "width" or "height" or "center" or "actual" ? m.ImageFitMode : "contain");
             P(cmd, "$m21", m.ImageBackgroundMusicFolder);
             P(cmd, "$m22", Math.Max(0, m.ImageBackgroundMusicIndex));
+            P(cmd, "$m23", m.MusicBackgroundRandom ? 1 : 0);
+            P(cmd, "$m24", m.MusicBackgroundFit is "contain" or "stretch" or "center" ? m.MusicBackgroundFit : "cover");
+            P(cmd, "$m25", Math.Clamp(m.MusicBackgroundBlur, 0, 10));
             cmd.ExecuteNonQuery();
         }
         using (var del = Cmd(cn, "DELETE FROM recent_folders;", tx)) del.ExecuteNonQuery();

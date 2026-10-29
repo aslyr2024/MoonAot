@@ -895,7 +895,7 @@ public sealed partial class MoonServer
                 if (cw is "full" or "2/3" or "1/2" or "default") s.Media.ComicWidth = cw;
                 if (media.TryGetProperty("comicAutoPage", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.ComicAutoPage = v.GetBoolean();
                 if (media.TryGetProperty("recursiveImages", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.RecursiveImages = v.GetBoolean();
-                if (media.TryGetProperty("musicBackgroundSeconds", out v) && v.TryGetInt32(out var n)) s.Media.MusicBackgroundSeconds = Math.Clamp(n, 1, 60);
+                if (media.TryGetProperty("musicBackgroundSeconds", out v) && v.TryGetDouble(out var mbs)) s.Media.MusicBackgroundSeconds = Math.Clamp(mbs, 0.1, 60);
                 if (media.TryGetProperty("musicShowLyrics", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.MusicShowLyrics = v.GetBoolean();
                 if (media.TryGetProperty("videoAutoResume", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.VideoAutoResume = v.GetBoolean();
                 var tr = GetString(media, "imageTransition");
@@ -919,6 +919,10 @@ public sealed partial class MoonServer
                     s.Media.MusicBackgroundFolder = string.IsNullOrWhiteSpace(bgf) ? null : bgf;
                 }
                 if (media.TryGetProperty("musicBackgroundIndex", out v) && v.TryGetInt32(out var bgi)) s.Media.MusicBackgroundIndex = Math.Max(0, bgi);
+                if (media.TryGetProperty("musicBackgroundRandom", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.MusicBackgroundRandom = v.GetBoolean();
+                var bgfit = GetString(media, "musicBackgroundFit");
+                if (bgfit is "cover" or "contain" or "stretch" or "center") s.Media.MusicBackgroundFit = bgfit;
+                if (media.TryGetProperty("musicBackgroundBlur", out v) && v.TryGetInt32(out var bgblur)) s.Media.MusicBackgroundBlur = Math.Clamp(bgblur, 0, 10);
                 var fm = GetString(media, "imageFitMode");
                 if (fm is "contain" or "width" or "height" or "center" or "actual") s.Media.ImageFitMode = fm;
                 if (media.TryGetProperty("imageBackgroundMusicFolder", out v) && v.ValueKind == JsonValueKind.String)

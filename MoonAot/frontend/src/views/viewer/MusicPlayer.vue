@@ -5,7 +5,7 @@ import {
   ExternalLink, FileMusic, FolderOpen, ImagePlus, ListMusic, Maximize, Music, Pause as PauseIcon, Play as PlayIcon, Plus,
   Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X,
 } from 'lucide-vue-next'
-import { NButton, NInput, NModal, NSelect, NSlider } from 'naive-ui'
+import { NButton, NInput, NModal, NSelect, NSlider, NSwitch } from 'naive-ui'
 import { api, urls } from '../../api'
 import { state } from '../../store'
 import { host } from '../../host'
@@ -46,6 +46,12 @@ const bgIndex = ref(state.settings.media.musicBackgroundIndex || 0)
 const bgUrl = ref('')
 const bgNext = ref('')
 const bgFading = ref(false)
+const bgRandom = ref(!!state.settings.media.musicBackgroundRandom)
+const bgFit = ref<'cover' | 'contain' | 'stretch' | 'center'>(
+  state.settings.media.musicBackgroundFit === 'contain' || state.settings.media.musicBackgroundFit === 'stretch' || state.settings.media.musicBackgroundFit === 'center'
+    ? state.settings.media.musicBackgroundFit : 'cover')
+const bgBlur = ref(clamp(Number(state.settings.media.musicBackgroundBlur ?? 5), 0, 10))
+const showBgSettings = ref(false)
 const lyricsBox = ref<HTMLElement | null>(null)
 
 let progressSaveAt = 0
@@ -57,6 +63,19 @@ let loadingSeq = 0
 const current = computed<ImageItem | undefined>(() => tracks.value[index.value])
 const empty = computed(() => !current.value && !path.value)
 const coverUrl = computed(() => current.value ? urls.audioCover(current.value.path) : '')
+const bgBlurPx = computed(() => Math.round(bgBlur.value * 3))
+function bgLayerStyle(url: string) {
+  if (!url) return {}
+  const size = bgFit.value === 'contain' ? 'contain' : bgFit.value === 'stretch' ? '100% 100%' : bgFit.value === 'center' ? 'auto' : 'cover'
+  return {
+    backgroundImage: `url(${url})`,
+    backgroundSize: size,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'center',
+    filter: bgBlurPx.value > 0 ? `blur(${bgBlurPx.value}px) saturate(1.08)` : 'none',
+    transform: bgBlurPx.value > 0 ? 'scale(1.02)' : 'none',
+  }
+}
 const title = computed(() => meta.value?.title || basename(current.value?.path) || '音乐')
 const artist = computed(() => meta.value?.artist || splitName(basename(current.value?.path)).artist || '未知艺术家')
 const modeIcon = computed(() => mode.value === 'shuffle' ? Shuffle : mode.value === 'repeat' ? Repeat1 : Repeat)
@@ -336,16 +355,17 @@ function setBgImmediate(url: string) {
 function startBgTimer() {
   if (bgTimer) { clearInterval(bgTimer); bgTimer = null }
   if (bgUrls.value.length <= 1) return
-  bgTimer = setInterval(rotateBg, Math.max(2, state.settings.media.musicBackgroundSeconds) * 1000)
+  bgTimer = setInterval(rotateBg, Math.max(0.1, Number(state.settings.media.musicBackgroundSeconds) || 8) * 1000)
 }
 
 function stopBgTimer() {
   if (bgTimer) { clearInterval(bgTimer); bgTimer = null }
 }
 
-function rotateBg() {
+function showBgIndex(next: number) {
   if (bgUrls.value.length <= 1) return
-  const next = (bgIndex.value + 1) % bgUrls.value.length
+  next = ((next % bgUrls.value.length) + bgUrls.value.length) % bgUrls.value.length
+  if (next === bgIndex.value) return
   const url = bgUrls.value[next]
   bgNext.value = url
   bgFading.value = true
@@ -360,7 +380,45 @@ function rotateBg() {
     bgSaveTimer = setTimeout(() => {
       void saveMedia({ musicBackgroundIndex: next, musicBackgroundFolder: bgFolder.value || null })
     }, 300)
-  }, 1150)
+  }, 900)
+}
+
+function rotateBg() {
+  if (bgUrls.value.length <= 1) return
+  let next: number
+  if (bgRandom.value) {
+    do { next = Math.floor(Math.random() * bgUrls.value.length) } while (next === bgIndex.value)
+  } else {
+    next = (bgIndex.value + 1) % bgUrls.value.length
+  }
+  showBgIndex(next)
+}
+
+function stepBg(dir: number) {
+  showBgIndex(bgIndex.value + dir)
+}
+
+function setBgSeconds(v: number | null) {
+  if (v === null || !Number.isFinite(v)) return
+  const seconds = Math.round(clamp(v, 0.1, 60) * 10) / 10
+  void saveMedia({ musicBackgroundSeconds: seconds })
+  if (bgUrls.value.length > 1) startBgTimer()
+}
+
+function setBgFit(v: 'cover' | 'contain' | 'stretch' | 'center') {
+  bgFit.value = v
+  void saveMedia({ musicBackgroundFit: v })
+}
+
+function setBgBlur(v: number | null) {
+  if (v === null || !Number.isFinite(v)) return
+  bgBlur.value = clamp(Math.round(v), 0, 10)
+  void saveMedia({ musicBackgroundBlur: bgBlur.value })
+}
+
+function setBgRandom(v: boolean) {
+  bgRandom.value = v
+  void saveMedia({ musicBackgroundRandom: v })
 }
 
 async function pickBackgroundFolder() {
@@ -567,8 +625,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="viewer music-viewer">
-    <div class="music-bg" :class="{ hide: bgFading }" :style="bgUrl ? { backgroundImage: `url(${bgUrl})` } : {}" />
-    <div class="music-bg next" :class="{ show: bgFading }" :style="bgNext ? { backgroundImage: `url(${bgNext})` } : {}" />
+    <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
+    <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
     <div class="music-veil" />
 
     <header class="viewer-bar music-bar">
@@ -582,8 +640,7 @@ onBeforeUnmount(() => {
       <div class="viewer-right">
         <button class="viewer-btn" title="打开音乐文件" @click="openMusicFile"><file-music :size="16" /></button>
         <button class="viewer-btn" title="打开音乐文件夹" @click="openMusicFolder"><folder-open :size="16" /></button>
-        <button class="viewer-btn" title="选择背景图片文件夹（递归轮播）" @click="pickBackgroundFolder"><image-plus :size="16" /></button>
-        <button v-if="bgFolder" class="viewer-btn" title="恢复为歌曲目录背景" @click="clearBackgroundFolder"><x :size="15" /></button>
+        <button class="viewer-btn" :class="{ active: showBgSettings }" title="背景轮播设置" @click="showBgSettings = !showBgSettings"><image-plus :size="16" /></button>
         <template v-if="!empty">
           <span class="bar-sep" />
           <button class="viewer-btn" title="在文件夹中显示" @click="host.reveal(path)"><external-link :size="16" /></button>
@@ -591,9 +648,59 @@ onBeforeUnmount(() => {
         </template>
         <span class="bar-sep" />
         <button class="viewer-btn" title="全屏" @click="host.toggleFullscreen()"><maximize :size="16" /></button>
-        <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="16" /></button>
       </div>
     </header>
+
+    <div v-if="showBgSettings" class="music-bg-settings">
+      <div class="mbg-head">
+        <strong>背景轮播</strong>
+        <button class="icon-btn subtle" @click="showBgSettings = false"><x :size="14" /></button>
+      </div>
+      <div class="mbg-row">
+        <span>文件夹</span>
+        <div class="mbg-path" :title="bgFolder">{{ bgFolder ? basename(bgFolder) : '未选择（使用歌曲目录图片）' }}</div>
+      </div>
+      <div class="mbg-row">
+        <n-button size="tiny" @click="pickBackgroundFolder"><template #icon><folder-open :size="13" /></template>选择文件夹</n-button>
+        <n-button size="tiny" :disabled="!bgFolder" @click="clearBackgroundFolder">恢复歌曲目录</n-button>
+      </div>
+      <div class="mbg-row">
+        <span>上一张/下一张</span>
+        <button class="viewer-btn" title="上一张背景" @click="stepBg(-1)"><skip-back :size="15" /></button>
+        <button class="viewer-btn" title="下一张背景" @click="stepBg(1)"><skip-forward :size="15" /></button>
+        <span class="mbg-hint">{{ bgUrls.length ? `${bgIndex + 1} / ${bgUrls.length}` : '无图片' }}</span>
+      </div>
+      <div class="mbg-row">
+        <span>间隔</span>
+        <n-slider :value="mediaSettings.musicBackgroundSeconds || 8" :min="0.1" :max="60" :step="0.1" style="flex:1" @update:value="setBgSeconds" />
+        <b>{{ Number(mediaSettings.musicBackgroundSeconds || 8).toFixed(1) }}s</b>
+      </div>
+      <div class="mbg-row">
+        <span>显示</span>
+        <n-select
+          :value="bgFit"
+          size="tiny"
+          style="flex:1"
+          :options="[
+            { label: '铺满裁切（cover）', value: 'cover' },
+            { label: '完整包含（contain）', value: 'contain' },
+            { label: '拉伸填满', value: 'stretch' },
+            { label: '原始居中', value: 'center' },
+          ]"
+          @update:value="setBgFit"
+        />
+      </div>
+      <div class="mbg-row">
+        <span>磨玻璃</span>
+        <n-slider :value="bgBlur" :min="0" :max="10" :step="1" style="flex:1" @update:value="setBgBlur" />
+        <b>{{ bgBlur }}</b>
+      </div>
+      <div class="mbg-row">
+        <span>随机</span>
+        <n-switch :value="bgRandom" size="small" @update:value="setBgRandom" />
+        <span class="mbg-hint">自动轮播时随机选择</span>
+      </div>
+    </div>
 
     <div v-if="empty" class="viewer-empty music-empty">
       <div class="ve-icon"><music :size="58" :stroke-width="1.05" /></div>

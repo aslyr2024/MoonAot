@@ -13,13 +13,17 @@ namespace MoonAot.Win;
 public sealed class ReaderWindow : WebViewWindowBase
 {
     public string BookId { get; private set; }
+    private LibraryQuery? _nav;
+    private string[]? _order;
+    private string? _orderSig;
 
     private static readonly string[] Empty = Array.Empty<string>();
     private long _lastSwitchTick;
 
-    public ReaderWindow(string bookId, string title) : base(string.IsNullOrWhiteSpace(title) ? "阅读" : title)
+    public ReaderWindow(string bookId, string title, LibraryQuery? nav = null) : base(string.IsNullOrWhiteSpace(title) ? "阅读" : title)
     {
         BookId = bookId;
+        _nav = nav;
         DbStore.Instance.UpdateProgress(bookId, -1, null);
         Closing += (_, _) => AppWindows.OnReaderClosed(this);
     }
@@ -116,6 +120,25 @@ public sealed class ReaderWindow : WebViewWindowBase
         catch { return false; }
     }
 
+    /// <summary>更新阅读器所属的书架筛选/排序上下文。</summary>
+    public void SetNav(LibraryQuery? nav)
+    {
+        _nav = nav;
+        _order = null;
+        _orderSig = null;
+    }
+
+    private string[] ReadingOrder()
+    {
+        if (_nav == null) return DbStore.Instance.TitleOrder();
+        if (_order == null || _orderSig != _nav.Signature)
+        {
+            _order = DbStore.Instance.ReadingOrder(_nav);
+            _orderSig = _nav.Signature;
+        }
+        return _order;
+    }
+
     private void SwitchBook(int dir)
     {
         // JS 注入与原生加速键可能同时触发，250ms 内只接受一次
@@ -124,9 +147,14 @@ public sealed class ReaderWindow : WebViewWindowBase
         _lastSwitchTick = now;
         try
         {
-            var ids = DbStore.Instance.TitleOrder();
+            var ids = ReadingOrder();
             if (ids.Length == 0) return;
             int idx = Array.IndexOf(ids, BookId);
+            if (idx < 0)
+            {
+                ids = DbStore.Instance.TitleOrder();
+                idx = Array.IndexOf(ids, BookId);
+            }
             if (idx < 0) return;
             int next = idx + dir;
             if (next < 0 || next >= ids.Length) return;

@@ -142,3 +142,8 @@
 - **幻灯片与背景音乐**：间隔改为 double（0.1–60s）并迁移 SQLite 字段；背景音乐支持文件夹递归扫描、曲目索引持久化。
 - **音乐播放器**：`loadPlaylist` 改为直接用返回的 PlaylistRecord 调 `loadQueue`，避免 `loadTracks` 从旧 route.query 覆盖列表；背景层固定 z-index，磨玻璃从 blur(28px)/inset -60px 调整为 blur(14px)/inset -18px。
 - **电源**：`shutdown.exe /s|/r /t N`、`/h` 休眠、`/a` 取消；定时开机依赖主板 RTC/BIOS，软件层只提供定时关机/重启。
+
+## 19. v1.0.3 阅读顺序与背景轮播
+
+- **阅读器切书顺序**：开书时把书架当前的 q/sort/desc/filter/format/author/folder 作为 `nav` 上下文传给 `ReaderWindow`；`DbStore.ReadingOrder(LibraryQuery)` 复用书架同一套 `BuildWhere/BuildOrder`，首次切书时缓存 ID 顺序，↑/↓ 严格按书架顺序执行。无上下文时才退回全库标题顺序。
+- **音乐背景控制**：新增 `musicBackgroundRandom/Fit/Blur` 与 double 间隔字段；`MusicPlayer` 用背景设置面板提供滑块/上一张/下一张/随机/显示方式/磨玻璃 0–10；背景层 z-index 固定，工具条允许换行。

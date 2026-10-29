@@ -25,6 +25,9 @@ const defaultMedia = (): MediaSettings => ({
   videoShowList: true,
   musicBackgroundFolder: null,
   musicBackgroundIndex: 0,
+  musicBackgroundRandom: false,
+  musicBackgroundFit: 'cover',
+  musicBackgroundBlur: 5,
 })
 
 export const defaultSettings = (): AppSettings => ({

@@ -200,7 +200,15 @@ function openItem(item: LibraryItem) {
     showDetail(item)
     return
   }
-  host.openBook(item.hash)
+  host.openBook(item.hash, {
+    q: q.value.trim() || undefined,
+    sort: sort.value,
+    desc: desc.value,
+    filter: filter.value,
+    format: format.value === 'all' ? undefined : format.value,
+    author: author.value || undefined,
+    folder: folder.value || undefined,
+  })
 }
 
 function showDetail(item: LibraryItem) {

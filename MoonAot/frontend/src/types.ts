@@ -22,6 +22,9 @@ export interface MediaSettings {
   videoShowList: boolean
   musicBackgroundFolder?: string | null
   musicBackgroundIndex: number
+  musicBackgroundRandom?: boolean
+  musicBackgroundFit?: 'cover' | 'contain' | 'stretch' | 'center'
+  musicBackgroundBlur?: number
   imageLastFolder?: string | null
 }
 

@@ -207,8 +207,8 @@ code { font-family: "Cascadia Code", "Consolas", monospace; font-size: .92em; ba
 
 /* ================= 播放器通用 ================= */
 .viewer { height: 100%; display: flex; flex-direction: column; background: #07090d; color: #e9ecf3; overflow: hidden; position: relative; font-family: var(--font-ui); }
-.viewer-bar { flex: none; height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, .07); background: rgba(8, 10, 15, .82); backdrop-filter: blur(16px); z-index: 5; }
-.viewer-left, .viewer-right { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.viewer-bar { flex: none; min-height: 54px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; padding: 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, .07); background: rgba(8, 10, 15, .82); backdrop-filter: blur(16px); z-index: 5; }
+.viewer-left, .viewer-right { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .viewer-name { margin-left: 8px; display: flex; flex-direction: column; min-width: 0; }
 .viewer-name strong { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
 .viewer-name span { font-size: 10px; color: rgba(255, 255, 255, .45); }
@@ -296,6 +296,13 @@ code { font-family: "Cascadia Code", "Consolas", monospace; font-size: .92em; ba
 .music-veil { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, rgba(5, 7, 10, .38), rgba(5, 7, 10, .72) 60%, rgba(5, 7, 10, .92)); }
 .music-bar { position: relative; z-index: 3; background: rgba(8, 10, 15, .5); }
 .music-layout { position: relative; z-index: 2; flex: 1; min-height: 0; overflow-y: auto; display: flex; justify-content: center; }
+.music-bg-settings { position: relative; margin: 8px 16px 0 auto; z-index: 8; width: 340px; max-width: 90vw; padding: 12px 14px; border-radius: 13px; border: 1px solid var(--border-strong); background: rgba(16, 20, 27, .97); backdrop-filter: blur(18px); box-shadow: 0 20px 50px rgba(0, 0, 0, .5); display: flex; flex-direction: column; gap: 9px; }
+.mbg-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text); }
+.mbg-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-2); }
+.mbg-row > span:first-child { width: 72px; flex: none; color: var(--text-3); }
+.mbg-row > b { width: 38px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.mbg-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; border-radius: 7px; background: var(--panel-2); color: var(--text-2); }
+.mbg-hint { font-size: 10px; color: var(--text-3); }
 .music-main { width: min(720px, 94vw); display: flex; flex-direction: column; align-items: center; padding: 18px 0 34px; }
 .music-art { position: relative; width: min(30vh, 280px); aspect-ratio: 1; border-radius: 22px; overflow: hidden; background: rgba(255, 255, 255, .04); box-shadow: 0 26px 70px rgba(0, 0, 0, .55); display: grid; place-items: center; }
 .music-art img { width: 100%; height: 100%; object-fit: cover; position: relative; z-index: 1; }

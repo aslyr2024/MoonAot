@@ -114,7 +114,23 @@ public sealed class ShelfWindow : WebViewWindowBase
                         var id = GetString(root, "bookId");
                         if (string.IsNullOrEmpty(id)) return;
                         var book = DbStore.Instance.GetBook(id);
-                        if (book != null) AppWindows.OpenReader(book.Id, book.Title);
+                        if (book == null) return;
+                        LibraryQuery? nav = null;
+                        if (root.TryGetProperty("nav", out var nv) && nv.ValueKind == JsonValueKind.Object)
+                        {
+                            nav = new LibraryQuery
+                            {
+                                Q = GetString(nv, "q"),
+                                Sort = GetString(nv, "sort") ?? "recent",
+                                Desc = !(nv.TryGetProperty("desc", out var dv) && dv.ValueKind == JsonValueKind.False),
+                                Filter = GetString(nv, "filter") ?? "all",
+                                Format = GetString(nv, "format"),
+                                Author = GetString(nv, "author"),
+                                Folder = GetString(nv, "folder"),
+                                Category = GetString(nv, "category"),
+                            };
+                        }
+                        AppWindows.OpenReader(book.Id, book.Title, nav);
                         return;
                     }
                 case "openViewer":

@@ -56,7 +56,7 @@ public static class AppWindows
         catch (Exception ex) { Log.Error("显示窗口失败", ex); }
     }
 
-    public static void OpenReader(string bookId, string title)
+    public static void OpenReader(string bookId, string title, LibraryQuery? nav = null)
     {
         lock (Lock)
         {
@@ -64,12 +64,13 @@ public static class AppWindows
             var existing = Readers.FirstOrDefault(r => r.BookId == bookId && !r.IsDisposed);
             if (existing != null)
             {
+                existing.SetNav(nav);
                 try { existing.SetForeground(); } catch { }
                 return;
             }
             Readers.RemoveAll(r => r.IsDisposed);
             var state = DbStore.Instance.AppSettings.ReaderWindow;
-            var win = new ReaderWindow(bookId, title);
+            var win = new ReaderWindow(bookId, title, nav);
             win.ApplySavedState(state);
             ShowWindow(win, state);
             Readers.Add(win);

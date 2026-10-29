@@ -90,6 +90,9 @@ public sealed class Database
             EnsureColumn(cn, "app_settings", "media_video_show_list", "INTEGER NOT NULL DEFAULT 1");
             EnsureColumn(cn, "app_settings", "media_music_bg_folder", "TEXT");
             EnsureColumn(cn, "app_settings", "media_music_bg_index", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn(cn, "app_settings", "media_music_bg_random", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn(cn, "app_settings", "media_music_bg_fit", "TEXT NOT NULL DEFAULT 'cover'");
+            EnsureColumn(cn, "app_settings", "media_music_bg_blur", "INTEGER NOT NULL DEFAULT 5");
             EnsureColumn(cn, "app_settings", "media_image_last_folder", "TEXT");
             EnsureColumn(cn, "app_settings", "media_image_fit", "TEXT NOT NULL DEFAULT 'contain'");
             EnsureColumn(cn, "app_settings", "media_image_bgm_folder", "TEXT");
@@ -299,6 +302,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
     media_video_show_list INTEGER NOT NULL DEFAULT 1,
     media_music_bg_folder TEXT,
     media_music_bg_index INTEGER NOT NULL DEFAULT 0,
+    media_music_bg_random INTEGER NOT NULL DEFAULT 0,
+    media_music_bg_fit TEXT NOT NULL DEFAULT 'cover',
+    media_music_bg_blur INTEGER NOT NULL DEFAULT 5,
     media_image_last_folder TEXT,
     media_image_fit TEXT NOT NULL DEFAULT 'contain',
     media_image_bgm_folder TEXT,

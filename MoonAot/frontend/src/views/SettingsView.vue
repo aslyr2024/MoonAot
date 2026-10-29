@@ -476,7 +476,7 @@ onBeforeUnmount(() => {
             <div class="panel-head"><h2><volume2 :size="15" />音乐与视频</h2></div>
             <div class="setting-grid">
               <label class="setting-field"><span>背景图轮播间隔</span>
-                <div class="slider-inline"><n-slider :value="s.media.musicBackgroundSeconds" :min="2" :max="60" :step="1" style="width: 160px" @update:value="v => setMedia('musicBackgroundSeconds', v)" /><b>{{ s.media.musicBackgroundSeconds }}s</b></div>
+                <div class="slider-inline"><n-slider :value="s.media.musicBackgroundSeconds" :min="0.1" :max="60" :step="0.1" style="width: 160px" @update:value="v => setMedia('musicBackgroundSeconds', v)" /><b>{{ Number(s.media.musicBackgroundSeconds).toFixed(1) }}s</b></div>
               </label>
               <label class="setting-field"><span>显示歌词面板</span><n-switch :value="s.media.musicShowLyrics" @update:value="v => setMedia('musicShowLyrics', v)" /></label>
               <label class="setting-field"><span>视频自动续播</span><n-switch :value="s.media.videoAutoResume" @update:value="v => setMedia('videoAutoResume', v)" /></label>

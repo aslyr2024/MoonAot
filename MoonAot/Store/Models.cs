@@ -98,7 +98,13 @@ public class MediaSettings
     public string ComicWidth { get; set; } = "default";
     public bool ComicAutoPage { get; set; }
     public bool RecursiveImages { get; set; }
-    public int MusicBackgroundSeconds { get; set; } = 8;
+    /// <summary>音乐播放器背景轮播间隔（秒），0.1–60。</summary>
+    public double MusicBackgroundSeconds { get; set; } = 8;
+    public bool MusicBackgroundRandom { get; set; }
+    /// <summary>背景图显示方式：cover / contain / stretch / center。</summary>
+    public string MusicBackgroundFit { get; set; } = "cover";
+    /// <summary>磨玻璃强度 0–10（0 为不模糊）。</summary>
+    public int MusicBackgroundBlur { get; set; } = 5;
     public bool MusicShowLyrics { get; set; } = true;
     public bool VideoAutoResume { get; set; } = true;
     /// <summary>幻灯片切换效果：none / fade / slide / zoom。</summary>

@@ -120,8 +120,8 @@ function requestDialog(message: Record<string, any>): Promise<string | null> {
 export const host = {
   get available() { return isHost },
 
-  openBook(hash: string) {
-    if (!post({ type: 'openBook', bookId: hash })) location.href = urls.reader(hash)
+  openBook(hash: string, nav?: Record<string, any>) {
+    if (!post({ type: 'openBook', bookId: hash, nav })) location.href = urls.reader(hash)
   },
 
   openViewer(kind: string, path = '', extra?: Record<string, string>) {
