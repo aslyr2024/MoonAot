@@ -1659,6 +1659,7 @@ WHERE n.deleted_at IS NULL
                     MusicBackgroundIndex = (int)Math.Max(0, L("media_music_bg_index")),
                     ImageLastFolder = S("media_image_last_folder").Length == 0 ? null : S("media_image_last_folder"),
                 };
+                s.ShelfQueryJson = S("shelf_query_json").Length == 0 ? null : S("shelf_query_json");
                 s.ShelfWindow = new WindowState
                 {
                     Width = (int)Math.Max(400, L("shelf_w")), Height = (int)Math.Max(300, L("shelf_h")),
@@ -1743,7 +1744,7 @@ UPDATE app_settings SET
  media_music_bg_folder=$m17, media_music_bg_index=$m18, media_image_last_folder=$m19,
  media_image_fit=$m20, media_image_bgm_folder=$m21, media_image_bgm_index=$m22,
  media_music_bg_random=$m23, media_music_bg_fit=$m24, media_music_bg_blur=$m25,
- media_image_bgm_playlist=$m26
+ media_image_bgm_playlist=$m26, shelf_query_json=$shelfQuery
 WHERE id=1;
 """, tx))
         {
@@ -1792,6 +1793,7 @@ WHERE id=1;
             P(cmd, "$m24", m.MusicBackgroundFit is "contain" or "stretch" or "center" ? m.MusicBackgroundFit : "cover");
             P(cmd, "$m25", Math.Clamp(m.MusicBackgroundBlur, 0, 10));
             P(cmd, "$m26", m.ImageBackgroundMusicPlaylist);
+            P(cmd, "$shelfQuery", s.ShelfQueryJson);
             cmd.ExecuteNonQuery();
         }
         using (var del = Cmd(cn, "DELETE FROM recent_folders;", tx)) del.ExecuteNonQuery();

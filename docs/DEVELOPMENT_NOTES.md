@@ -192,3 +192,11 @@
 - 配置层：`NormalizeBooknotes` 在 `UpsertConfig` 与 `GET /api/bookconfig/{id}` 时合并重复 booknote，阅读器重新加载后标注列表也只剩一条；无重复时原样返回，不改写 JSON。
 - 删除：`MarkNoteDeleted` 把同 CFI/类型/原文的兄弟 booknote 一起标记 `deletedAt`，否则下次同步会以另一条 ID 复活。
 - 验证：用真实库副本启动 JIT 构建，5 条标注合并为 3 条；`GET /api/bookconfig` 返回的 `booknotes` 由 2 条变为 1 条且保留 note 与 color。
+
+## 28. v1.0.12 书架筛选状态持久化
+
+- 此前只有 `sortMode/sortDesc` 写入 `app_settings`，`q/filter/format/author/folder` 只存在于 `ShelfView` 的内存 ref，重启即丢失。
+- 新增 `app_settings.shelf_query_json`（`AppSettings.ShelfQueryJson`），由 `/api/appsettings` 原样读写；内容为 `{q,filter,format,author,folder}`。
+- 前端在 `setup` 阶段解析并校验枚举（状态、格式），再初始化 refs；`main.ts` 已 `await loadSettings()` 后才挂载，因此不会先按默认筛选加载一次。
+- 五个字段统一 `watch`，400ms 防抖写入；`clearFilters()` 会触发保存空条件；组件卸载时立即保存一次，避免切页前输入未落库。
+- 验证：浏览器里输入搜索词并点击“收藏”后，`/api/appsettings` 返回对应 JSON；重启 JIT 构建后书架搜索框与“收藏”激活态均恢复，结果为筛选后的空/非空集合。

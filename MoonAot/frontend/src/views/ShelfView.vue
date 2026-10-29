@@ -28,13 +28,30 @@ const PAGE = 120
 const router = useRouter()
 const route = useRoute()
 
-const q = ref('')
+const FILTER_KEYS = ['all', 'reading', 'unread', 'finished', 'favorite']
+const FORMAT_KEYS = ['all', 'TXT', 'EPUB', 'PDF', 'MOBI', 'AZW3', 'MD']
+
+function savedShelfQuery(): Record<string, unknown> {
+  try {
+    const raw = state.settings.shelfQueryJson
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' ? obj as Record<string, unknown> : {}
+  } catch { return {} }
+}
+const restoredQuery = savedShelfQuery()
+function restored(key: string, allowed?: string[]) {
+  const v = restoredQuery[key]
+  return typeof v === 'string' && (!allowed || allowed.includes(v)) ? v : ''
+}
+
+const q = ref(restored('q'))
 const sort = ref(state.settings.sortMode || 'recent')
 const desc = ref(state.settings.sortDesc ?? true)
-const filter = ref('all')
-const format = ref('all')
-const author = ref('')
-const folder = ref('')
+const filter = ref(restored('filter', FILTER_KEYS) || 'all')
+const format = ref(restored('format', FORMAT_KEYS) || 'all')
+const author = ref(restored('author'))
+const folder = ref(restored('folder'))
 
 const total = ref(0)
 const items = ref<(LibraryItem | undefined)[]>([])
@@ -192,6 +209,16 @@ watch([sort, desc], () => {
   reset()
 })
 watch([filter, format, author, folder], () => reset())
+
+// 筛选/搜索状态持久化，重启后恢复同一书架视图
+function saveShelfQuery() {
+  const payload = JSON.stringify({ q: q.value, filter: filter.value, format: format.value, author: author.value, folder: folder.value })
+  if (payload === state.settings.shelfQueryJson) return
+  void saveSettings({ shelfQueryJson: payload })
+}
+const saveShelfQuerySoon = debounce(saveShelfQuery, 400)
+watch([q, filter, format, author, folder], () => saveShelfQuerySoon())
+
 watch(() => libraryTick.value, () => { if (route.name === 'shelf') void refreshVisible() })
 
 function openItem(item: LibraryItem) {
@@ -449,6 +476,7 @@ onActivated(() => {
 })
 
 onBeforeUnmount(() => {
+  saveShelfQuery()
   window.removeEventListener('moonaot-import', onGlobalImport)
   window.removeEventListener('keydown', onKeyDown)
 })

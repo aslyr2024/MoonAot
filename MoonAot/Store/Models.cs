@@ -184,6 +184,8 @@ public class AppSettings
     /// <summary>按日期（yyyy-MM-dd）累计的阅读秒数，用于统计图。</summary>
     public Dictionary<string, long> DailyReading { get; set; } = new();
     public bool AutoRefreshLibrary { get; set; } = true;
+    /// <summary>书架筛选/搜索状态 JSON（q/filter/format/author/folder），重启后恢复。</summary>
+    public string? ShelfQueryJson { get; set; }
     public string? LastVersion { get; set; }
 
     public AppSettings Clone()

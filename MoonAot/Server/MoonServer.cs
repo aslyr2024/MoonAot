@@ -887,6 +887,11 @@ public sealed partial class MoonServer
             if (root.TryGetProperty("importCovers", out var ic) && ic.ValueKind is JsonValueKind.True or JsonValueKind.False) s.ImportCovers = ic.GetBoolean();
             if (root.TryGetProperty("useDefaultCover", out var udc) && udc.ValueKind is JsonValueKind.True or JsonValueKind.False) s.UseDefaultCover = udc.GetBoolean();
             if (root.TryGetProperty("autoRefreshLibrary", out var ar) && ar.ValueKind is JsonValueKind.True or JsonValueKind.False) s.AutoRefreshLibrary = ar.GetBoolean();
+            if (root.TryGetProperty("shelfQueryJson", out var sq) && sq.ValueKind == JsonValueKind.String)
+            {
+                var text = sq.GetString();
+                s.ShelfQueryJson = string.IsNullOrWhiteSpace(text) ? null : text;
+            }
             if (root.TryGetProperty("media", out var media) && media.ValueKind == JsonValueKind.Object)
             {
                 if (media.TryGetProperty("imageSlideSeconds", out var v) && v.TryGetDouble(out var slidev)) s.Media.ImageSlideSeconds = Math.Clamp(slidev, 0.1, 60);
@@ -981,7 +986,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.0.11",
+            Version = "1.0.12",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,

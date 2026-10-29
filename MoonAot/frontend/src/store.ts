@@ -47,6 +47,7 @@ export const defaultSettings = (): AppSettings => ({
   autoRefreshLibrary: true,
   recentFolders: [],
   lastFolder: null,
+  shelfQueryJson: null,
   media: defaultMedia(),
 })
 

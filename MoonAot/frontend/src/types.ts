@@ -43,6 +43,7 @@ export interface AppSettings {
   autoRefreshLibrary: boolean
   recentFolders: string[]
   lastFolder?: string | null
+  shelfQueryJson?: string | null
   media: MediaSettings
 }
 
