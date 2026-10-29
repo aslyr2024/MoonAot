@@ -167,3 +167,7 @@
 ## 23. v1.0.7 背景居中作用域
 
 - 背景层从整窗移回 `.music-right`（右侧 2/3），`background-position:50% 50%` 在右侧区域内居中；左侧 1/3 保持深色，无卡片边框。
+
+## 24. v1.0.8 切歌标题闪现旧名
+
+- `loadTrack` 在设置新 path 前未清空 `meta`，标题 computed 先取到上一首的 `meta.title`，等 `audioMeta` 返回后才更新。切歌开始时立即 `meta.value = null`，标题先用新文件名，元数据返回后自然替换。

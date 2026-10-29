@@ -64,18 +64,18 @@ dotnet publish MoonAot.csproj -c Release -r win-x64 -p:Platform=x64 -o publish
 ## 6. 制作 GitHub Release
 
 ```bash
-mkdir -p dist/MoonAot-v1.0.7-win-x64
-cp publish/MoonAot.exe publish/e_sqlite3.dll dist/MoonAot-v1.0.7-win-x64/
-cp -r publish/Assets dist/MoonAot-v1.0.7-win-x64/
+mkdir -p dist/MoonAot-v1.0.8-win-x64
+cp publish/MoonAot.exe publish/e_sqlite3.dll dist/MoonAot-v1.0.8-win-x64/
+cp -r publish/Assets dist/MoonAot-v1.0.8-win-x64/
 # 可选：写入 README.txt
 cd dist
-powershell Compress-Archive -Path MoonAot-v1.0.7-win-x64 -DestinationPath MoonAot-v1.0.7-win-x64.zip
+powershell Compress-Archive -Path MoonAot-v1.0.8-win-x64 -DestinationPath MoonAot-v1.0.8-win-x64.zip
 ```
 
 上传 zip 到 GitHub Releases；附 SHA256：
 
 ```powershell
-Get-FileHash MoonAot-v1.0.7-win-x64.zip -Algorithm SHA256
+Get-FileHash MoonAot-v1.0.8-win-x64.zip -Algorithm SHA256
 ```
 
 ## 7. 常见构建问题

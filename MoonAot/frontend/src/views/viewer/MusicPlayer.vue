@@ -132,6 +132,9 @@ async function loadTrack(autoplay: boolean) {
   const t = current.value
   if (!t) return
   const seq = ++loadingSeq
+  // 立即丢弃上一首元数据，否则标题会先显示上一首的名字，
+  // 等新歌 audioMeta 返回后才跳回正确标题。
+  meta.value = null
   path.value = t.path
   codecError.value = false
   coverFailed.value = false
