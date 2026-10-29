@@ -630,9 +630,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="viewer music-viewer">
-    <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
-    <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
-    <div class="music-veil" />
     <header class="viewer-bar music-bar">
       <div class="viewer-left">
         <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="17" /></button>
@@ -794,6 +791,9 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="music-right">
+        <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
+        <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
+        <div class="music-veil" />
         <div class="music-right-head">
           <span class="music-right-label">歌词</span>
           <span class="music-right-count">{{ bgUrls.length ? `${bgIndex + 1} / ${bgUrls.length}` : '无背景图' }}</span>

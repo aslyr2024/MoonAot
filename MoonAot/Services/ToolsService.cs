@@ -40,7 +40,7 @@ public static partial class ToolsService
             CpuCount = Environment.ProcessorCount,
             CpuName = ReadCpuName(),
             UptimeSeconds = Environment.TickCount64 / 1000,
-            AppVersion = "1.0.6",
+            AppVersion = "1.0.7",
             DataDir = DbStore.Instance.DataDir,
         };
         try { dto.WorkingSet = Process.GetCurrentProcess().WorkingSet64; } catch { }

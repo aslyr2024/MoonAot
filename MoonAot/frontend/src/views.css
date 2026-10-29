@@ -293,7 +293,7 @@ code { font-family: "Cascadia Code", "Consolas", monospace; font-size: .92em; ba
 .music-bg.next { opacity: 0; }
 .music-bg.next.show { opacity: .76; }
 .music-bg.hide { opacity: 0; }
-.music-veil { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, rgba(5, 7, 10, .93) 0%, rgba(5, 7, 10, .78) 34%, rgba(5, 7, 10, .2) 66%, rgba(5, 7, 10, .42) 100%), linear-gradient(0deg, rgba(5, 7, 10, .55), transparent 40%); }
+.music-veil { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, rgba(5, 7, 10, .9) 0%, rgba(5, 7, 10, .35) 16%, rgba(5, 7, 10, .12) 45%, rgba(5, 7, 10, .38) 100%), linear-gradient(0deg, rgba(5, 7, 10, .6), transparent 42%); }
 .music-bar { position: relative; z-index: 3; min-height: 62px; padding-top: 9px; background: rgba(8, 10, 15, .72); }
 .music-layout { position: relative; z-index: 2; flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 24px; padding: 4px 26px 18px; }
 .music-left { min-width: 0; display: flex; flex-direction: column; align-items: center; overflow-y: auto; padding: 20px 10px 12px; background: transparent; }
@@ -327,7 +327,7 @@ code { font-family: "Cascadia Code", "Consolas", monospace; font-size: .92em; ba
 .music-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 14px; border: none; background: none; color: rgba(255, 255, 255, .42); font-size: 11.5px; cursor: pointer; border-bottom: 2px solid transparent; }
 .music-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
 .lyrics-panel { width: 100%; max-width: 560px; max-height: 30vh; overflow-y: auto; padding: 14px 10px 20px; text-align: center; }
-.music-right { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: transparent; display: flex; flex-direction: column; }
+.music-right { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #080b10; display: flex; flex-direction: column; }
 .music-right-head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 20px 4px 0 18px; font-size: 11px; color: rgba(255, 255, 255, .55); letter-spacing: .08em; }
 .music-right-label { text-transform: uppercase; font-weight: 600; }
 .music-right-count { color: rgba(255, 255, 255, .35); letter-spacing: 0; }
