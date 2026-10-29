@@ -309,10 +309,10 @@ code { font-family: "Cascadia Code", "Consolas", monospace; font-size: .92em; ba
 .music-art img { width: 100%; height: 100%; object-fit: cover; position: relative; z-index: 1; }
 .art-fallback { display: flex; flex-direction: column; align-items: center; gap: 10px; color: rgba(255, 255, 255, .4); font-size: 12px; padding: 20px; text-align: center; }
 .art-glow { position: absolute; inset: -20px; background: radial-gradient(circle, var(--accent-soft), transparent 70%); z-index: 0; }
-.music-info { margin-top: 16px; text-align: center; max-width: 100%; }
-.music-info h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.music-info p { margin: 4px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, .55); }
-.music-album { display: inline-block; margin-top: 5px; font-size: 10.5px; color: rgba(255, 255, 255, .35); }
+.music-info { margin-top: 14px; text-align: center; max-width: 100%; min-height: 80px; display: flex; flex-direction: column; align-items: center; }
+.music-info h1 { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 650; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.music-info p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.4; color: rgba(255, 255, 255, .55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.music-album { display: block; min-height: 15px; line-height: 15px; margin-top: 4px; font-size: 10.5px; color: rgba(255, 255, 255, .35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .music-progress { width: 100%; max-width: none; margin-top: 12px; }
 .music-times { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255, 255, 255, .4); margin-top: -2px; font-variant-numeric: tabular-nums; }
 .music-controls { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }

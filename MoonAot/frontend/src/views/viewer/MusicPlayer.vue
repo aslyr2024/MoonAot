@@ -730,7 +730,7 @@ onBeforeUnmount(() => {
         <div class="music-info">
           <h1 :title="title">{{ title }}</h1>
           <p>{{ artist }}</p>
-          <span v-if="meta?.album" class="music-album">{{ meta.album }}</span>
+          <span class="music-album">{{ meta?.album || '' }}</span>
         </div>
 
         <div class="music-progress">

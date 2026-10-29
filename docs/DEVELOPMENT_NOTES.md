@@ -171,3 +171,9 @@
 ## 24. v1.0.8 切歌标题闪现旧名
 
 - `loadTrack` 在设置新 path 前未清空 `meta`，标题 computed 先取到上一首的 `meta.title`，等 `audioMeta` 返回后才更新。切歌开始时立即 `meta.value = null`，标题先用新文件名，元数据返回后自然替换。
+
+## 25. v1.0.9 切歌时界面上下跳动
+
+- v1.0.8 在切歌开始清空 `meta` 后，模板里的 `<span v-if="meta?.album">` 整行消失，`.music-info` 高度变小，下方进度条、控制按钮和播放列表整体上移；新元数据返回后又下移。
+- 同时标题/歌手没有强制单行，遇到长名称换行也会改变信息区高度。
+- 修复：`.music-info` 设固定 `min-height:80px` 并改为纵向 flex；专辑名行始终渲染（内容为空也占 `15px`）；标题、歌手、专辑名统一 `white-space:nowrap` + `text-overflow:ellipsis`。切歌过程中左栏各块位置不再变化。
