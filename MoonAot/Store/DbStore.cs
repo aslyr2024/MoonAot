@@ -73,6 +73,7 @@ public sealed class DbStore
         EnsureDefaults();
         ScanCovers();
         CleanupLegacyCoverMarkers();
+        DedupeAllNotes();
         Log.Info($"SQLite 就绪: {Count} 本，版本 {Version}");
     }
 
@@ -986,8 +987,47 @@ FROM configs WHERE book_id=$id;
         }
     }
 
+    /// <summary>
+    /// 阅读器给已有高亮补写笔记时会追加一条同 CFI 的 booknote。
+    /// 返回前把重复项合并为一条（保留有笔记/未删除/较新的），无重复时原样返回。
+    /// </summary>
+    public static string? NormalizeBooknotes(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.IndexOf("\"booknotes\"", StringComparison.Ordinal) < 0) return json;
+        try
+        {
+            var dto = JsonSerializer.Deserialize(json, Info<BookConfigDto>.I);
+            if (dto?.Booknotes == null || dto.Booknotes.Count < 2) return json;
+            var groups = dto.Booknotes
+                .Where(n => !string.IsNullOrEmpty(n.Cfi))
+                .GroupBy(n => ((n.Type ?? "annotation"), n.Cfi!, n.Text ?? ""))
+                .Where(g => g.Count() > 1)
+                .ToList();
+            if (groups.Count == 0) return json;
+            foreach (var g in groups)
+            {
+                var keeper = g.OrderBy(n => n.DeletedAt == null ? 0 : 1)
+                    .ThenByDescending(n => !string.IsNullOrEmpty(n.Note))
+                    .ThenByDescending(n => n.UpdatedAt ?? 0)
+                    .First();
+                foreach (var other in g.Where(n => !ReferenceEquals(n, keeper)).ToList())
+                {
+                    if (string.IsNullOrEmpty(keeper.Color)) keeper.Color = other.Color;
+                    if (string.IsNullOrEmpty(keeper.Style)) keeper.Style = other.Style;
+                    if ((other.CreatedAt ?? 0) > 0 && ((keeper.CreatedAt ?? 0) == 0 || other.CreatedAt < keeper.CreatedAt))
+                        keeper.CreatedAt = other.CreatedAt;
+                    if ((other.UpdatedAt ?? 0) > (keeper.UpdatedAt ?? 0)) keeper.UpdatedAt = other.UpdatedAt;
+                    dto.Booknotes.Remove(other);
+                }
+            }
+            return JsonSerializer.Serialize(dto, Info<BookConfigDto>.I);
+        }
+        catch { return json; }
+    }
+
     private static void UpsertConfig(SqliteConnection cn, SqliteTransaction tx, ConfigRecord cfg)
     {
+        cfg.ConfigJson = NormalizeBooknotes(cfg.ConfigJson);
         var hash = string.IsNullOrEmpty(cfg.ConfigJson)
             ? null
             : Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(cfg.ConfigJson)))
@@ -1081,8 +1121,87 @@ VALUES($id,$book,$type,$cfi,$text,$note,$style,$color,$page,$progress,$label,$ch
                 pdeleted.Value = GetDeletedAt(it) ?? (object)DBNull.Value;
                 try { ins.ExecuteNonQuery(); } catch { }
             }
+            DedupeNotes(cn, tx, bookId);
         }
         catch { }
+    }
+
+    private sealed record NoteRow(string Id, string BookId, string Type, string Cfi, string Text, string Note,
+        string? Color, string? Style, string? Label, string? Chapter,
+        long CreatedAt, long UpdatedAt, long? DeletedAt);
+
+    private void DedupeAllNotes()
+    {
+        try
+        {
+            lock (Database.Instance.SyncRoot)
+            {
+                using var cn = Database.Instance.Open();
+                using var tx = cn.BeginTransaction();
+                var n = DedupeNotes(cn, tx, null);
+                tx.Commit();
+                if (n > 0) Log.Info($"合并重复标注: {n} 组");
+            }
+        }
+        catch (Exception ex) { Log.Warn("合并重复标注失败: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// 阅读器给已有高亮补写笔记时会生成同 CFI 的第二条 booknote。
+    /// 这里按 (书, 类型, CFI, 原文) 合并：保留有笔记的一条，颜色/样式取非空值。
+    /// </summary>
+    private static int DedupeNotes(SqliteConnection cn, SqliteTransaction? tx, string? bookId)
+    {
+        var rows = new List<NoteRow>();
+        var sql = "SELECT id,book_id,type,cfi,COALESCE(text,''),COALESCE(note,''),color,style,label,chapter,created_at,updated_at,deleted_at FROM notes";
+        if (!string.IsNullOrEmpty(bookId)) sql += " WHERE book_id=$book";
+        using (var cmd = Cmd(cn, sql, tx))
+        {
+            if (!string.IsNullOrEmpty(bookId)) P(cmd, "$book", bookId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                rows.Add(new NoteRow(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+                    r.GetString(4), r.GetString(5), Str(r, 6), Str(r, 7), Str(r, 8), Str(r, 9),
+                    Lng(r, 10), Lng(r, 11), r.IsDBNull(12) ? null : r.GetInt64(12)));
+            }
+        }
+        var groups = rows.Where(x => !string.IsNullOrEmpty(x.Cfi))
+            .GroupBy(x => (x.BookId, x.Type, x.Cfi, x.Text))
+            .Where(g => g.Count() > 1)
+            .ToList();
+        foreach (var g in groups)
+        {
+            var keeper = g.OrderByDescending(x => !string.IsNullOrEmpty(x.Note))
+                .ThenByDescending(x => x.UpdatedAt)
+                .ThenByDescending(x => x.CreatedAt)
+                .First();
+            string? FirstNonEmpty(Func<NoteRow, string?> f)
+                => !string.IsNullOrEmpty(f(keeper)) ? f(keeper) : g.Select(f).FirstOrDefault(v => !string.IsNullOrEmpty(v));
+            var created = g.Where(x => x.CreatedAt > 0).Select(x => x.CreatedAt).DefaultIfEmpty(keeper.CreatedAt).Min();
+            var updated = g.Max(x => x.UpdatedAt);
+            long? deleted = g.All(x => x.DeletedAt != null) ? g.Max(x => x.DeletedAt!.Value) : null;
+            using (var up = Cmd(cn, "UPDATE notes SET note=$note,color=$color,style=$style,label=$label,chapter=$chapter,created_at=$created,updated_at=$updated,deleted_at=$deleted WHERE id=$id;", tx))
+            {
+                P(up, "$note", keeper.Note);
+                P(up, "$color", FirstNonEmpty(x => x.Color));
+                P(up, "$style", FirstNonEmpty(x => x.Style));
+                P(up, "$label", FirstNonEmpty(x => x.Label));
+                P(up, "$chapter", FirstNonEmpty(x => x.Chapter));
+                P(up, "$created", created);
+                P(up, "$updated", updated);
+                P(up, "$deleted", deleted);
+                P(up, "$id", keeper.Id);
+                up.ExecuteNonQuery();
+            }
+            foreach (var other in g.Where(x => x.Id != keeper.Id))
+            {
+                using var del = Cmd(cn, "DELETE FROM notes WHERE id=$id;", tx);
+                P(del, "$id", other.Id);
+                del.ExecuteNonQuery();
+            }
+        }
+        return groups.Count;
     }
 
     private static string? GetStr(JsonElement e, string name) =>
@@ -1527,6 +1646,7 @@ WHERE n.deleted_at IS NULL
                     ImageTransition = Empty(S("media_image_transition"), "fade"),
                     ImageFitMode = Empty(S("media_image_fit"), "contain"),
                     ImageBackgroundMusicFolder = S("media_image_bgm_folder").Length == 0 ? null : S("media_image_bgm_folder"),
+                    ImageBackgroundMusicPlaylist = S("media_image_bgm_playlist").Length == 0 ? null : S("media_image_bgm_playlist"),
                     ImageBackgroundMusicIndex = Math.Max(0, (int)L("media_image_bgm_index")),
                     ImageBackgroundMusic = S("media_image_bgm").Length == 0 ? null : S("media_image_bgm"),
                     ImageSlideLoop = L("media_image_slide_loop") != 0,
@@ -1622,7 +1742,8 @@ UPDATE app_settings SET
  media_video_volume=$m15, media_video_show_list=$m16,
  media_music_bg_folder=$m17, media_music_bg_index=$m18, media_image_last_folder=$m19,
  media_image_fit=$m20, media_image_bgm_folder=$m21, media_image_bgm_index=$m22,
- media_music_bg_random=$m23, media_music_bg_fit=$m24, media_music_bg_blur=$m25
+ media_music_bg_random=$m23, media_music_bg_fit=$m24, media_music_bg_blur=$m25,
+ media_image_bgm_playlist=$m26
 WHERE id=1;
 """, tx))
         {
@@ -1670,6 +1791,7 @@ WHERE id=1;
             P(cmd, "$m23", m.MusicBackgroundRandom ? 1 : 0);
             P(cmd, "$m24", m.MusicBackgroundFit is "contain" or "stretch" or "center" ? m.MusicBackgroundFit : "cover");
             P(cmd, "$m25", Math.Clamp(m.MusicBackgroundBlur, 0, 10));
+            P(cmd, "$m26", m.ImageBackgroundMusicPlaylist);
             cmd.ExecuteNonQuery();
         }
         using (var del = Cmd(cn, "DELETE FROM recent_folders;", tx)) del.ExecuteNonQuery();

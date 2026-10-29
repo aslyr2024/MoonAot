@@ -13,6 +13,7 @@ export interface MediaSettings {
   imageFitMode?: 'contain' | 'width' | 'height' | 'center' | 'actual'
   imageBackgroundMusic?: string | null
   imageBackgroundMusicFolder?: string | null
+  imageBackgroundMusicPlaylist?: string | null
   imageBackgroundMusicIndex?: number
   imageSlideLoop: boolean
   musicVolume: number

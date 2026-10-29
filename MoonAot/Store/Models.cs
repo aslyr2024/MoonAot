@@ -115,6 +115,8 @@ public class MediaSettings
     public string? ImageBackgroundMusic { get; set; }
     /// <summary>幻灯片背景音乐文件夹（优先于单文件；空 = 不使用文件夹）。</summary>
     public string? ImageBackgroundMusicFolder { get; set; }
+    /// <summary>幻灯片背景音乐使用的已保存音乐列表 ID（优先于文件夹/单文件；空 = 不使用列表）。</summary>
+    public string? ImageBackgroundMusicPlaylist { get; set; }
     /// <summary>背景音乐文件夹上次播放到的索引。</summary>
     public int ImageBackgroundMusicIndex { get; set; }
     /// <summary>幻灯片到末尾后是否循环。</summary>

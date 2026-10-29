@@ -930,6 +930,11 @@ public sealed partial class MoonServer
                     var bmf = v.GetString();
                     s.Media.ImageBackgroundMusicFolder = string.IsNullOrWhiteSpace(bmf) ? null : bmf;
                 }
+                if (media.TryGetProperty("imageBackgroundMusicPlaylist", out v) && v.ValueKind == JsonValueKind.String)
+                {
+                    var bmp = v.GetString();
+                    s.Media.ImageBackgroundMusicPlaylist = string.IsNullOrWhiteSpace(bmp) ? null : bmp;
+                }
                 if (media.TryGetProperty("imageBackgroundMusicIndex", out v) && v.TryGetInt32(out var bmi)) s.Media.ImageBackgroundMusicIndex = Math.Max(0, bmi);
                 if (media.TryGetProperty("imageLastFolder", out v) && v.ValueKind == JsonValueKind.String)
                 {
@@ -976,7 +981,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.0.10",
+            Version = "1.0.11",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,
@@ -1062,11 +1067,7 @@ public sealed partial class MoonServer
                     if (dto != null && note != null)
                     {
                         var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                        if (remove)
-                        {
-                            using var doc = JsonDocument.Parse(now.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                            note.DeletedAt = doc.RootElement.Clone();
-                        }
+                        if (remove) MarkNoteDeleted(dto, note, now);
                         else
                         {
                             note.Note = newText ?? "";
@@ -1093,11 +1094,7 @@ public sealed partial class MoonServer
                     var note = dto?.Booknotes?.FirstOrDefault(n => n.Id == noteId);
                     if (dto == null || note == null) continue;
                     var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                    if (remove)
-                    {
-                        using var doc = JsonDocument.Parse(now.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                        note.DeletedAt = doc.RootElement.Clone();
-                    }
+                    if (remove) MarkNoteDeleted(dto, note, now);
                     else note.Note = newText ?? "";
                     note.UpdatedAt = now;
                     dto.UpdatedAt = now;
@@ -1111,6 +1108,25 @@ public sealed partial class MoonServer
         }
         var rowOk = DbStore.Instance.UpdateNoteRow(noteId, newText, remove);
         return configOk || rowOk;
+    }
+
+    /// <summary>同 CFI/类型/原文即同一处标注；删除时把重复 booknote 一并标记，避免重新同步后又冒出来。</summary>
+    private static void MarkNoteDeleted(BookConfigDto dto, BookNoteRecord note, long now)
+    {
+        JsonElement deletedAt;
+        using (var doc = JsonDocument.Parse(now.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+            deletedAt = doc.RootElement.Clone();
+        note.DeletedAt = deletedAt;
+        if (dto.Booknotes == null || string.IsNullOrEmpty(note.Cfi)) return;
+        foreach (var sib in dto.Booknotes)
+        {
+            if (ReferenceEquals(sib, note) || sib.DeletedAt != null) continue;
+            if (sib.Cfi != note.Cfi) continue;
+            if (!string.Equals(sib.Type ?? "annotation", note.Type ?? "annotation", StringComparison.Ordinal)) continue;
+            if (!string.Equals(sib.Text ?? "", note.Text ?? "", StringComparison.Ordinal)) continue;
+            sib.DeletedAt = deletedAt;
+            sib.UpdatedAt = now;
+        }
     }
 
     // ---------- 阅读配置 ----------
@@ -1129,7 +1145,7 @@ public sealed partial class MoonServer
             }
             var sb = new StringBuilder();
             sb.Append("{\"bookId\":").Append(JsonStr(cfg.BookId))
-              .Append(",\"configJson\":").Append(JsonStr(cfg.ConfigJson ?? "{}"))
+              .Append(",\"configJson\":").Append(JsonStr(DbStore.NormalizeBooknotes(cfg.ConfigJson) ?? "{}"))
               .Append(",\"progress\":").Append(JsonStr(cfg.Progress))
               .Append(",\"location\":").Append(JsonStr(cfg.Location)).Append('}');
             SendJsonString(ctx, 200, sb.ToString());

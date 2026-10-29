@@ -183,3 +183,12 @@
 - 后端 `DELETE /api/media/playlists/{id}` 与前端 `api.deletePlaylist` 早已存在，但音乐播放器没有入口。新增“播放列表管理”弹窗：列出 `kind=audio` 的已保存列表，可载入或删除；删除走二次确认，只删 `playlists/playlist_items`，不动音乐文件；若删的是当前列表，清空 `playlistId/playlistName` 与路由 `playlist` 参数，队列继续播放。
 - 全屏抽屉：`MediaViewerWindow.OnFullscreenChanged` 会派发 `moon-fullscreen`，前端监听后设置 `immersive`（同时监听 `document.fullscreenchange` 作为浏览器回退）。进入全屏后 `.music-layout` 变单列，`.music-left` 改为 `position:fixed` + `translateX(-102%)`；左侧 10px 热区 `mouseenter` 展开，面板 `mouseleave` 收起。
 - `fixed` 不受父级 `overflow:hidden` 裁剪，前提是祖先没有 `transform/filter`；`.viewer` 满足该条件。
+
+## 27. v1.0.11 图片背景音乐列表与重复标注
+
+- 图片浏览器：新增设置列 `media_image_bgm_playlist`（`ImageBackgroundMusicPlaylist`）。幻灯片设置里列出 `kind=audio` 的已保存列表，选中后通过 `/api/media/playlists/{id}` 取队列；列表、文件夹、单文件三种来源互斥，选择其一时清空另外两项。启动时优先按列表恢复，其次文件夹，最后单文件。
+- 重复标注根因：阅读器先创建高亮（booknote A，带 color，note 为空），再给该高亮写笔记时会新建 booknote B（同 CFI/原文，带 note，color 为空），两条都留在 `config_json.booknotes` 里，因此笔记页显示两次。
+- 存储层：`DbStore.DedupeNotes` 按 `(book_id,type,cfi,text)` 合并，优先保留未删除、带笔记、较新的记录，继承非空 color/style，取最早 createdAt 与最晚 updatedAt；启动时跑一遍，`SyncNotes` 每本书同步后再跑一遍。
+- 配置层：`NormalizeBooknotes` 在 `UpsertConfig` 与 `GET /api/bookconfig/{id}` 时合并重复 booknote，阅读器重新加载后标注列表也只剩一条；无重复时原样返回，不改写 JSON。
+- 删除：`MarkNoteDeleted` 把同 CFI/类型/原文的兄弟 booknote 一起标记 `deletedAt`，否则下次同步会以另一条 ID 复活。
+- 验证：用真实库副本启动 JIT 构建，5 条标注合并为 3 条；`GET /api/bookconfig` 返回的 `booknotes` 由 2 条变为 1 条且保留 note 与 color。

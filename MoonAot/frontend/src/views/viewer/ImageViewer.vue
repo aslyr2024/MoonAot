@@ -10,7 +10,7 @@ import { api, urls } from '../../api'
 import { state } from '../../store'
 import { host } from '../../host'
 import { toast, toastError } from '../../ui'
-import type { ImageItem, ImagePage } from '../../types'
+import type { ImageItem, ImagePage, PlaylistSummary } from '../../types'
 import { basename, clamp, dirname, formatBytes } from '../../utils'
 import ImageEditor from './ImageEditor.vue'
 
@@ -47,6 +47,7 @@ const immersive = ref(false)
 const bgmEl = ref<HTMLAudioElement | null>(null)
 const bgmTracks = ref<string[]>([])
 const bgmIndex = ref(0)
+const bgmPlaylists = ref<PlaylistSummary[]>([])
 const animClass = ref('')
 const imgBust = ref(0)
 const editorOpen = ref(false)
@@ -62,6 +63,7 @@ let sliderTimer: ReturnType<typeof setTimeout> | null = null
 const mediaSettings = computed(() => state.settings.media)
 const slideTransition = computed(() => mediaSettings.value.imageTransition || 'fade')
 const bgmFolder = computed(() => mediaSettings.value.imageBackgroundMusicFolder || '')
+const bgmPlaylist = computed(() => bgmPlaylists.value.find(p => p.id === (mediaSettings.value.imageBackgroundMusicPlaylist || '')) || null)
 const bgmTrack = computed(() => bgmTracks.value.length ? bgmTracks.value[Math.min(bgmIndex.value, bgmTracks.value.length - 1)] : '')
 const bgmSrc = computed(() => bgmTrack.value
   ? urls.media(bgmTrack.value)
@@ -547,7 +549,7 @@ async function chooseBgm() {
   if (!file) return
   bgmTracks.value = []
   bgmIndex.value = 0
-  await saveMedia({ imageBackgroundMusic: file, imageBackgroundMusicFolder: null, imageBackgroundMusicIndex: 0 })
+  await saveMedia({ imageBackgroundMusic: file, imageBackgroundMusicFolder: null, imageBackgroundMusicPlaylist: null, imageBackgroundMusicIndex: 0 })
 }
 
 async function chooseBgmFolder() {
@@ -555,9 +557,33 @@ async function chooseBgmFolder() {
   if (!dir) return
   bgmTracks.value = []
   bgmIndex.value = 0
-  await saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: dir, imageBackgroundMusicIndex: 0 })
+  await saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: dir, imageBackgroundMusicPlaylist: null, imageBackgroundMusicIndex: 0 })
   await loadBgmFolder(dir)
   if (!bgmTracks.value.length) toast('这个文件夹里没有音乐', 'warning')
+  else if (slideshow.value) playBgm()
+}
+
+async function loadBgmPlaylist(id: string) {
+  if (!id) { bgmTracks.value = []; bgmIndex.value = 0; return }
+  try {
+    const rec = await api.playlist(id)
+    bgmTracks.value = rec.items
+    bgmIndex.value = clamp(mediaSettings.value.imageBackgroundMusicIndex || 0, 0, Math.max(0, rec.items.length - 1))
+  } catch { bgmTracks.value = []; bgmIndex.value = 0 }
+}
+
+async function chooseBgmPlaylist(id: string | null) {
+  if (!id) {
+    bgmTracks.value = []
+    bgmIndex.value = 0
+    await saveMedia({ imageBackgroundMusicPlaylist: null, imageBackgroundMusicIndex: 0 })
+    return
+  }
+  bgmTracks.value = []
+  bgmIndex.value = 0
+  await saveMedia({ imageBackgroundMusicPlaylist: id, imageBackgroundMusic: null, imageBackgroundMusicFolder: null, imageBackgroundMusicIndex: 0 })
+  await loadBgmPlaylist(id)
+  if (!bgmTracks.value.length) toast('这个播放列表里没有音乐', 'warning')
   else if (slideshow.value) playBgm()
 }
 
@@ -582,12 +608,14 @@ function clearBgm() {
   pauseBgm()
   bgmTracks.value = []
   bgmIndex.value = 0
-  void saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: null, imageBackgroundMusicIndex: 0 })
+  void saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: null, imageBackgroundMusicPlaylist: null, imageBackgroundMusicIndex: 0 })
 }
 
-const bgmName = computed(() => bgmTracks.value.length
-  ? `${basename(bgmFolder.value)} · ${bgmTracks.value.length} 首`
-  : (mediaSettings.value.imageBackgroundMusic ? basename(mediaSettings.value.imageBackgroundMusic) : ''))
+const bgmName = computed(() => {
+  if (bgmPlaylist.value) return `${bgmPlaylist.value.name} · ${bgmTracks.value.length} 首`
+  if (bgmTracks.value.length) return `${basename(bgmFolder.value)} · ${bgmTracks.value.length} 首`
+  return mediaSettings.value.imageBackgroundMusic ? basename(mediaSettings.value.imageBackgroundMusic) : ''
+})
 
 watch(bgmSrc, () => {
   if (slideshow.value) playBgm()
@@ -729,7 +757,9 @@ onMounted(async () => {
     await restoreViewState()
     await load(current.value)
   }
-  if (mediaSettings.value.imageBackgroundMusicFolder) await loadBgmFolder(mediaSettings.value.imageBackgroundMusicFolder)
+  try { bgmPlaylists.value = (await api.playlists()).items.filter(p => p.kind === 'audio') } catch { }
+  if (mediaSettings.value.imageBackgroundMusicPlaylist) await loadBgmPlaylist(mediaSettings.value.imageBackgroundMusicPlaylist)
+  else if (mediaSettings.value.imageBackgroundMusicFolder) await loadBgmFolder(mediaSettings.value.imageBackgroundMusicFolder)
   window.addEventListener('keydown', onKey)
   window.addEventListener('moon-fullscreen', onFullscreenEvent as EventListener)
 })
@@ -837,6 +867,19 @@ onBeforeUnmount(() => {
         <n-switch :value="mediaSettings.imageSlideLoop" size="small" @update:value="setSlideLoop" />
         <span class="ss-hint">到末尾后从头开始</span>
       </div>
+      <div class="ss-row">
+        <span>音乐列表</span>
+        <n-select
+          size="small"
+          style="flex: 1"
+          clearable
+          :value="mediaSettings.imageBackgroundMusicPlaylist || null"
+          :options="bgmPlaylists.map(p => ({ label: `${p.name}（${p.count}）`, value: p.id }))"
+          :placeholder="bgmPlaylists.length ? '选择已保存的音乐列表' : '暂无已保存的音乐列表'"
+          :disabled="!bgmPlaylists.length"
+          @update:value="chooseBgmPlaylist"
+        />
+      </div>
       <div class="ss-row bgm">
         <span>背景音乐</span>
         <div class="ss-bgm" :title="bgmName || '未设置'">
@@ -847,7 +890,7 @@ onBeforeUnmount(() => {
         <button class="icon-btn subtle" title="选择背景音乐文件夹（递归）" @click="chooseBgmFolder"><folder-open :size="14" /></button>
         <button v-if="bgmName" class="icon-btn subtle danger" title="清除背景音乐" @click="clearBgm"><trash2 :size="14" /></button>
       </div>
-      <small class="ss-note">幻灯片播放时自动播放背景音乐；窗口静音由系统音量控制。</small>
+      <small class="ss-note">幻灯片播放时自动播放背景音乐；可直接选用音乐播放器保存的列表，也可指定文件或文件夹。</small>
     </div>
 
     <audio ref="bgmEl" :src="bgmSrc" :loop="bgmTracks.length <= 1" preload="auto" class="bgm-audio" @ended="onBgmEnded" />

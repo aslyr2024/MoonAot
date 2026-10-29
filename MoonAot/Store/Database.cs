@@ -96,6 +96,7 @@ public sealed class Database
             EnsureColumn(cn, "app_settings", "media_image_last_folder", "TEXT");
             EnsureColumn(cn, "app_settings", "media_image_fit", "TEXT NOT NULL DEFAULT 'contain'");
             EnsureColumn(cn, "app_settings", "media_image_bgm_folder", "TEXT");
+            EnsureColumn(cn, "app_settings", "media_image_bgm_playlist", "TEXT");
             EnsureColumn(cn, "app_settings", "media_image_bgm_index", "INTEGER NOT NULL DEFAULT 0");
             EnsureColumn(cn, "app_settings", "browser_w", "INTEGER NOT NULL DEFAULT 1280");
             EnsureColumn(cn, "app_settings", "browser_h", "INTEGER NOT NULL DEFAULT 820");
@@ -308,6 +309,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     media_image_last_folder TEXT,
     media_image_fit TEXT NOT NULL DEFAULT 'contain',
     media_image_bgm_folder TEXT,
+    media_image_bgm_playlist TEXT,
     media_image_bgm_index INTEGER NOT NULL DEFAULT 0,
     last_version TEXT
 );
