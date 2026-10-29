@@ -1,1 +1,0 @@
-import{_ as s}from"./_plugin-vue_export-helper-DlAUqK2U.js";import{l as t,j as r,m as a}from"./index-HXvzCVnD.js";const c={},o={class:"search-page"};function n(i,e){return t(),r("div",o,[...e[0]||(e[0]=[a("iframe",{class:"tiny-frame",src:"/tiny/",title:"全盘搜索"},null,-1)])])}const l=s(c,[["render",n],["__scopeId","data-v-d1f61943"]]);export{l as default};

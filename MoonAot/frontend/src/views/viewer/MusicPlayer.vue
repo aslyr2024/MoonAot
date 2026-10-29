@@ -626,10 +626,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="viewer music-viewer">
-    <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
-    <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
-    <div class="music-veil" />
-
     <header class="viewer-bar music-bar">
       <div class="viewer-left">
         <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="17" /></button>
@@ -718,10 +714,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="music-layout">
-      <section class="music-main">
+      <section class="music-left">
         <div class="music-art">
           <img v-if="!coverFailed" :src="coverUrl" alt="" @error="coverFailed = true" />
-          <div v-else class="art-fallback"><music :size="76" :stroke-width="1" /><span>{{ title }}</span></div>
+          <div v-else class="art-fallback"><music :size="64" :stroke-width="1" /><span>{{ title }}</span></div>
           <div class="art-glow" />
         </div>
         <div class="music-info">
@@ -761,31 +757,13 @@ onBeforeUnmount(() => {
           <n-button size="small" @click="api.fsOpen(path)">用系统播放器打开</n-button>
         </div>
 
-        <div class="music-tabs">
-          <button :class="{ active: tab === 'list' }" @click="setTab('list')"><list-music :size="14" />播放列表</button>
-          <button :class="{ active: tab === 'lyrics' }" @click="setTab('lyrics')">歌词</button>
-        </div>
-
-        <div v-if="tab === 'lyrics'" ref="lyricsBox" class="lyrics-panel">
-          <template v-if="lyrics?.lines?.length">
-            <p
-              v-for="(l, i) in lyrics.lines"
-              :key="i"
-              class="lyric-line"
-              :class="{ active: i === activeLine }"
-              @click="seek(l.t)"
-            >{{ l.text }}</p>
-          </template>
-          <pre v-else-if="lyrics?.plain" class="lyrics-plain">{{ lyrics.plain }}</pre>
-          <p v-else class="lyrics-empty">暂无歌词。可将同名 .lrc 文件放在音乐目录，或联网自动获取。</p>
-        </div>
-        <div v-else class="playlist-panel">
+        <div class="playlist-panel music-left-playlist">
           <div class="playlist-head">
             <span>{{ playlistName || '当前文件夹' }} · {{ tracks.length }} 首</span>
             <n-select
               size="tiny"
-              style="width: 180px"
-              placeholder="载入已保存播放列表"
+              style="width: 150px"
+              placeholder="载入已保存列表"
               :options="savedPlaylists.map(p => ({ label: `${p.name}（${p.count}）`, value: p.id }))"
               @update:value="(id: string) => { const p = savedPlaylists.find(x => x.id === id); if (p) loadPlaylist(p) }"
             />
@@ -805,6 +783,34 @@ onBeforeUnmount(() => {
               <span class="track-del" title="从队列移除" @click.stop="removeTrack(i)"><x :size="12" /></span>
             </button>
           </div>
+        </div>
+      </section>
+
+      <section class="music-right">
+        <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
+        <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
+        <div class="music-right-veil" />
+        <div class="music-right-head">
+          <strong>歌词</strong>
+          <span class="music-right-count">{{ bgUrls.length ? `${bgIndex + 1} / ${bgUrls.length}` : '无背景图' }}</span>
+        </div>
+        <div ref="lyricsBox" class="lyrics-panel music-lyrics">
+          <template v-if="lyrics?.lines?.length">
+            <p
+              v-for="(l, i) in lyrics.lines"
+              :key="i"
+              class="lyric-line"
+              :class="{ active: i === activeLine }"
+              @click="seek(l.t)"
+            >{{ l.text }}</p>
+          </template>
+          <pre v-else-if="lyrics?.plain" class="lyrics-plain">{{ lyrics.plain }}</pre>
+          <p v-else class="lyrics-empty">暂无歌词。可将同名 .lrc 文件放在音乐目录，或联网自动获取。</p>
+        </div>
+        <div class="music-bg-bar">
+          <button class="viewer-btn" title="上一张背景" @click="stepBg(-1)"><skip-back :size="15" /></button>
+          <button class="viewer-btn" title="下一张背景" @click="stepBg(1)"><skip-forward :size="15" /></button>
+          <span>{{ bgUrls.length ? `${bgIndex + 1} / ${bgUrls.length}` : '无背景图' }}</span>
         </div>
       </section>
     </div>

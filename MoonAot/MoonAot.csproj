@@ -14,8 +14,8 @@
 		<InvariantGlobalization>false</InvariantGlobalization>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<RootNamespace>MoonAot</RootNamespace>
-		<Version>1.0.4</Version>
-		<InformationalVersion>1.0.4</InformationalVersion>
+		<Version>1.0.5</Version>
+		<InformationalVersion>1.0.5</InformationalVersion>
 		<!-- 前端源码与依赖不参与 .NET 编译/发布 -->
 		<DefaultItemExcludes>$(DefaultItemExcludes);frontend/**</DefaultItemExcludes>
 		<InvariantGlobalization>false</InvariantGlobalization>

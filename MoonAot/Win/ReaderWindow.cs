@@ -31,7 +31,8 @@ public sealed class ReaderWindow : WebViewWindowBase
             _order = DbStore.Instance.ReadingOrder(nav);
             _orderSig = nav.Signature;
         }
-        DbStore.Instance.UpdateProgress(bookId, -1, null);
+        // 打开窗口不再写 last_read_at：书架顺序在用户筛选/排序后保持固定，
+        // 真正阅读进度由阅读器保存时再更新。
         Closing += (_, _) => AppWindows.OnReaderClosed(this);
     }
 
@@ -94,7 +95,6 @@ public sealed class ReaderWindow : WebViewWindowBase
         if (book == null) return;
         BookId = bookId;
         Text = string.IsNullOrWhiteSpace(title) ? book.Title : title;
-        DbStore.Instance.UpdateProgress(bookId, -1, null);
         AppWindows.CloseOtherReader(this, bookId);
         NavigateReader();
     }

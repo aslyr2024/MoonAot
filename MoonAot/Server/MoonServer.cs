@@ -976,7 +976,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.0.4",
+            Version = "1.0.5",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,
@@ -1176,7 +1176,8 @@ public sealed partial class MoonServer
         DbStore.Instance.UpdateProgress(bookId, progress, location);
         var delta = DbStore.Instance.NoteConfigSeen(bookId);
         if (delta > 0) DbStore.Instance.AddReadingSeconds(bookId, delta);
-        NotifyChangedThrottled();
+        // 进度保存不触发书架刷新：书架排序在用户筛选/排序后保持稳定，
+        // 不能在阅读时因 last_read_at 变化把当前书挪到第一位。
         SendJson(ctx, 200, new OkDto { Ok = true });
     }
 
