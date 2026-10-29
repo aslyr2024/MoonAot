@@ -60,6 +60,7 @@ let bgFadeTimer: ReturnType<typeof setTimeout> | null = null
 let bgSaveTimer: ReturnType<typeof setTimeout> | null = null
 let loadingSeq = 0
 
+const mediaSettings = computed(() => state.settings.media)
 const current = computed<ImageItem | undefined>(() => tracks.value[index.value])
 const empty = computed(() => !current.value && !path.value)
 const coverUrl = computed(() => current.value ? urls.audioCover(current.value.path) : '')

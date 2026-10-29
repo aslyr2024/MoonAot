@@ -147,3 +147,9 @@
 
 - **阅读器切书顺序**：开书时把书架当前的 q/sort/desc/filter/format/author/folder 作为 `nav` 上下文传给 `ReaderWindow`；`DbStore.ReadingOrder(LibraryQuery)` 复用书架同一套 `BuildWhere/BuildOrder`，首次切书时缓存 ID 顺序，↑/↓ 严格按书架顺序执行。无上下文时才退回全库标题顺序。
 - **音乐背景控制**：新增 `musicBackgroundRandom/Fit/Blur` 与 double 间隔字段；`MusicPlayer` 用背景设置面板提供滑块/上一张/下一张/随机/显示方式/磨玻璃 0–10；背景层 z-index 固定，工具条允许换行。
+
+## 20. v1.0.4 切书顺序与音乐面板
+
+- **最近阅读顺序被开书动作改变**：`ReaderWindow` 打开时会写 `last_read_at`，若随后才计算导航列表，当前书会跳到第一位，导致上键无效、下键走到原第二本。改为在构造时先调用 `ReadingOrder(nav)` 冻结列表，再写进度。
+- **音乐背景设置黑屏**：`MusicPlayer` 模板引用了未定义的 `mediaSettings`，点击面板触发渲染异常。补上 `computed(() => state.settings.media)` 后恢复。
+- **顶栏重叠**：音乐窗口工具条增加 9px 顶部内边距与最小高度，并保留全局工具条换行；设置版本号统一为 1.0.4。

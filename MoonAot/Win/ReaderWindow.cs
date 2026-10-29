@@ -24,6 +24,13 @@ public sealed class ReaderWindow : WebViewWindowBase
     {
         BookId = bookId;
         _nav = nav;
+        // 必须在写入 last_read_at 之前冻结书架顺序：否则打开书会让它跳到“最近阅读”第一位，
+        // 上下键就会从错误的位置开始。
+        if (nav != null)
+        {
+            _order = DbStore.Instance.ReadingOrder(nav);
+            _orderSig = nav.Signature;
+        }
         DbStore.Instance.UpdateProgress(bookId, -1, null);
         Closing += (_, _) => AppWindows.OnReaderClosed(this);
     }
@@ -124,8 +131,16 @@ public sealed class ReaderWindow : WebViewWindowBase
     public void SetNav(LibraryQuery? nav)
     {
         _nav = nav;
-        _order = null;
-        _orderSig = null;
+        if (nav != null)
+        {
+            _order = DbStore.Instance.ReadingOrder(nav);
+            _orderSig = nav.Signature;
+        }
+        else
+        {
+            _order = null;
+            _orderSig = null;
+        }
     }
 
     private string[] ReadingOrder()
