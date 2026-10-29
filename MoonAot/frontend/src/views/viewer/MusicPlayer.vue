@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ExternalLink, FileMusic, FolderOpen, ImagePlus, ListMusic, Maximize, Music, Pause as PauseIcon, Play as PlayIcon, Plus,
-  Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X,
+  Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Trash2, Volume2, VolumeX, X,
 } from 'lucide-vue-next'
 import { NButton, NInput, NModal, NSelect, NSlider, NSwitch } from 'naive-ui'
 import { api, urls } from '../../api'
@@ -38,6 +38,12 @@ const savedPlaylists = ref<PlaylistSummary[]>([])
 const saveModal = ref(false)
 const saveName = ref('')
 const saving = ref(false)
+const manageModal = ref(false)
+const deleteModal = ref(false)
+const deleteTarget = ref<PlaylistSummary | null>(null)
+const deleting = ref(false)
+const immersive = ref(false)
+const leftPeek = ref(false)
 const coverFailed = ref(false)
 const codecError = ref(false)
 const bgFolder = ref(state.settings.media.musicBackgroundFolder || '')
@@ -529,7 +535,57 @@ async function loadMusicFolder(dir: string) {
 }
 
 async function loadSavedPlaylists() {
-  try { savedPlaylists.value = (await api.playlists()).items } catch { }
+  try { savedPlaylists.value = (await api.playlists()).items.filter(p => p.kind === 'audio') } catch { }
+}
+
+function openManage() {
+  void loadSavedPlaylists()
+  manageModal.value = true
+}
+
+function manageLoad(p: PlaylistSummary) {
+  manageModal.value = false
+  if (p.id === playlistId.value && tracks.value.length) return
+  void loadPlaylist(p)
+}
+
+function openDelete(p: PlaylistSummary) {
+  deleteTarget.value = p
+  deleteModal.value = true
+}
+
+async function doDelete() {
+  const p = deleteTarget.value
+  if (!p || deleting.value) return
+  deleting.value = true
+  try {
+    await api.deletePlaylist(p.id)
+    savedPlaylists.value = savedPlaylists.value.filter(x => x.id !== p.id)
+    if (playlistId.value === p.id) {
+      playlistId.value = ''
+      playlistName.value = ''
+      const q: Record<string, string> = {}
+      for (const [k, v] of Object.entries(route.query)) {
+        if (k !== 'playlist' && typeof v === 'string') q[k] = v
+      }
+      void router.replace({ query: q })
+    }
+    toast(`已删除播放列表：${p.name}`)
+    deleteModal.value = false
+  } catch (e) { toastError(e) } finally {
+    deleting.value = false
+    deleteTarget.value = null
+  }
+}
+
+function onFullscreenEvent(ev: Event) {
+  immersive.value = !!(ev as CustomEvent).detail
+  if (!immersive.value) leftPeek.value = false
+}
+
+function onDocFullscreen() {
+  immersive.value = !!document.fullscreenElement
+  if (!immersive.value) leftPeek.value = false
 }
 
 function openSave() {
@@ -619,6 +675,8 @@ onMounted(async () => {
   else if (folderParam) await loadMusicFolder(folderParam)
   else await restoreLastPlaylist()
   window.addEventListener('keydown', onKey)
+  window.addEventListener('moon-fullscreen', onFullscreenEvent as EventListener)
+  document.addEventListener('fullscreenchange', onDocFullscreen)
   window.addEventListener('beforeunload', () => saveProgress(true))
   window.addEventListener('pagehide', () => saveProgress(true))
 })
@@ -628,11 +686,13 @@ onBeforeUnmount(() => {
   audio.value?.pause()
   if (bgTimer) clearInterval(bgTimer)
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('moon-fullscreen', onFullscreenEvent as EventListener)
+  document.removeEventListener('fullscreenchange', onDocFullscreen)
 })
 </script>
 
 <template>
-  <div class="viewer music-viewer">
+  <div class="viewer music-viewer" :class="{ immersive, 'peek-left': leftPeek }">
     <header class="viewer-bar music-bar">
       <div class="viewer-left">
         <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="17" /></button>
@@ -721,7 +781,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="music-layout">
-      <section class="music-left">
+      <div v-if="immersive" class="music-left-hotzone" @mouseenter="leftPeek = true" />
+      <section class="music-left" @mouseenter="leftPeek = true" @mouseleave="leftPeek = false">
         <div class="music-art">
           <img v-if="!coverFailed" :src="coverUrl" alt="" @error="coverFailed = true" />
           <div v-else class="art-fallback"><music :size="64" :stroke-width="1" /><span>{{ title }}</span></div>
@@ -767,13 +828,16 @@ onBeforeUnmount(() => {
         <div class="playlist-panel music-left-playlist">
           <div class="playlist-head">
             <span>{{ playlistName || '当前文件夹' }} · {{ tracks.length }} 首</span>
-            <n-select
-              size="tiny"
-              style="width: 150px"
-              placeholder="载入已保存列表"
-              :options="savedPlaylists.map(p => ({ label: `${p.name}（${p.count}）`, value: p.id }))"
-              @update:value="(id: string) => { const p = savedPlaylists.find(x => x.id === id); if (p) loadPlaylist(p) }"
-            />
+            <div class="playlist-tools">
+              <n-select
+                size="tiny"
+                style="width: 132px"
+                placeholder="载入已保存列表"
+                :options="savedPlaylists.map(p => ({ label: `${p.name}（${p.count}）`, value: p.id }))"
+                @update:value="(id: string) => { const p = savedPlaylists.find(x => x.id === id); if (p) loadPlaylist(p) }"
+              />
+              <button class="viewer-btn" title="管理播放列表" @click="openManage"><list-music :size="14" /></button>
+            </div>
           </div>
           <div class="playlist-list">
             <button
@@ -839,6 +903,32 @@ onBeforeUnmount(() => {
         <div class="modal-actions">
           <n-button @click="saveModal = false">取消</n-button>
           <n-button type="primary" :loading="saving" @click="doSave">保存</n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="manageModal" preset="card" title="播放列表管理" style="width: 480px">
+      <p v-if="!savedPlaylists.length" class="modal-hint">还没有保存的播放列表。打开音乐文件夹或点击上方 + 号即可保存。</p>
+      <div v-else class="pl-manage-list">
+        <div v-for="p in savedPlaylists" :key="p.id" class="pl-manage-row">
+          <div class="pl-manage-name">
+            <strong :title="p.name">{{ p.name }}</strong>
+            <span>{{ p.count }} 首</span>
+          </div>
+          <n-button size="tiny" :disabled="p.id === playlistId && !!tracks.length" @click="manageLoad(p)">载入</n-button>
+          <n-button size="tiny" quaternary type="error" @click="openDelete(p)">
+            <template #icon><trash-2 :size="13" /></template>删除
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <n-modal v-model:show="deleteModal" preset="card" title="删除播放列表" style="width: 420px">
+      <p class="modal-hint">确定删除“{{ deleteTarget?.name }}”吗？只删除保存的列表，不会删除音乐文件。</p>
+      <template #footer>
+        <div class="modal-actions">
+          <n-button @click="deleteModal = false">取消</n-button>
+          <n-button type="error" :loading="deleting" @click="doDelete">删除</n-button>
         </div>
       </template>
     </n-modal>

@@ -177,3 +177,9 @@
 - v1.0.8 在切歌开始清空 `meta` 后，模板里的 `<span v-if="meta?.album">` 整行消失，`.music-info` 高度变小，下方进度条、控制按钮和播放列表整体上移；新元数据返回后又下移。
 - 同时标题/歌手没有强制单行，遇到长名称换行也会改变信息区高度。
 - 修复：`.music-info` 设固定 `min-height:80px` 并改为纵向 flex；专辑名行始终渲染（内容为空也占 `15px`）；标题、歌手、专辑名统一 `white-space:nowrap` + `text-overflow:ellipsis`。切歌过程中左栏各块位置不再变化。
+
+## 26. v1.0.10 播放列表删除与全屏抽屉
+
+- 后端 `DELETE /api/media/playlists/{id}` 与前端 `api.deletePlaylist` 早已存在，但音乐播放器没有入口。新增“播放列表管理”弹窗：列出 `kind=audio` 的已保存列表，可载入或删除；删除走二次确认，只删 `playlists/playlist_items`，不动音乐文件；若删的是当前列表，清空 `playlistId/playlistName` 与路由 `playlist` 参数，队列继续播放。
+- 全屏抽屉：`MediaViewerWindow.OnFullscreenChanged` 会派发 `moon-fullscreen`，前端监听后设置 `immersive`（同时监听 `document.fullscreenchange` 作为浏览器回退）。进入全屏后 `.music-layout` 变单列，`.music-left` 改为 `position:fixed` + `translateX(-102%)`；左侧 10px 热区 `mouseenter` 展开，面板 `mouseleave` 收起。
+- `fixed` 不受父级 `overflow:hidden` 裁剪，前提是祖先没有 `transform/filter`；`.viewer` 满足该条件。

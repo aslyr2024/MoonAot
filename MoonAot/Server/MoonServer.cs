@@ -976,7 +976,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.0.9",
+            Version = "1.0.10",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,
