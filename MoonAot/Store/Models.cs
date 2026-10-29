@@ -91,7 +91,8 @@ public class ConfigRecord
 /// <summary>媒体库偏好。</summary>
 public class MediaSettings
 {
-    public int ImageSlideSeconds { get; set; } = 5;
+    /// <summary>幻灯片间隔（秒），0.1–60，可含一位小数。</summary>
+    public double ImageSlideSeconds { get; set; } = 5;
     public bool ComicMode { get; set; }
     /// <summary>full / 2/3 / 1/2 / default</summary>
     public string ComicWidth { get; set; } = "default";
@@ -102,8 +103,14 @@ public class MediaSettings
     public bool VideoAutoResume { get; set; } = true;
     /// <summary>幻灯片切换效果：none / fade / slide / zoom。</summary>
     public string ImageTransition { get; set; } = "fade";
+    /// <summary>图片显示方式：contain / width / height / center / actual。</summary>
+    public string ImageFitMode { get; set; } = "contain";
     /// <summary>幻灯片背景音乐文件（空 = 不播放）。</summary>
     public string? ImageBackgroundMusic { get; set; }
+    /// <summary>幻灯片背景音乐文件夹（优先于单文件；空 = 不使用文件夹）。</summary>
+    public string? ImageBackgroundMusicFolder { get; set; }
+    /// <summary>背景音乐文件夹上次播放到的索引。</summary>
+    public int ImageBackgroundMusicIndex { get; set; }
     /// <summary>幻灯片到末尾后是否循环。</summary>
     public bool ImageSlideLoop { get; set; } = true;
     /// <summary>音乐播放器上次音量（0~1）。</summary>

@@ -168,8 +168,8 @@ export const api = {
   ports: () => apiGet<PortItem[]>('/api/tools/ports'),
   killPort: (port: number) => apiPost(`/api/tools/ports/${port}/kill`, {}),
   screenshot: () => apiPost<{ ok: boolean; path?: string; error?: string }>('/api/tools/screenshot', {}),
-  power: (action: 'lock' | 'sleep' | 'screenoff' | 'shutdown' | 'restart') =>
-    apiPost('/api/tools/power', { action }),
+  power: (action: 'lock' | 'sleep' | 'hibernate' | 'screenoff' | 'shutdown' | 'restart' | 'cancel', delaySeconds = 0) =>
+    apiPost('/api/tools/power', { action, delaySeconds }),
   archiveCompress: (folder: string, zip: string) =>
     apiPost('/api/tools/archive/compress', { folder, zip }),
   archiveExtract: (zip: string, dest: string) =>

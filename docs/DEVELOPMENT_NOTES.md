@@ -133,3 +133,12 @@
 - 旧版 `.doc`/`.ppt` 与 `.dwg` 需要外部转换或系统程序；
 - GDI+ 无法解码 AVIF 时封面回退原图，由 Chromium 显示；
 - 内置阅读器基于 AGPL-3.0 的 Readest/nn-reader，再分发需遵守其许可。
+
+## 18. v1.0.2 交互修复
+
+- **阅读器方向键**：书籍内容位于 iframe 时，原生 WM_KEYDOWN/加速键不一定到达宿主。改为用 `AddScriptToExecuteOnDocumentCreatedAsync` 注入捕获阶段 keydown；iframe 通过 `top.postMessage` 转发，宿主 `prevBook/nextBook` 切书；原生路径加 250ms 去抖避免双触发。
+- **图片显示模式**：NSelect 原宽度 94px，选项被省略成“自动…/适应…”。加宽到 132px 并给菜单 minWidth 144px；新增自动居中、适应高度。
+- **图片全屏只留图片**：页面维护 immersive 状态 + CSS 隐藏标题栏/缩略图；原生 `OnFullscreenChanged` 通过 `moon-fullscreen` 事件同步 F11/Esc 的真实全屏状态。
+- **幻灯片与背景音乐**：间隔改为 double（0.1–60s）并迁移 SQLite 字段；背景音乐支持文件夹递归扫描、曲目索引持久化。
+- **音乐播放器**：`loadPlaylist` 改为直接用返回的 PlaylistRecord 调 `loadQueue`，避免 `loadTracks` 从旧 route.query 覆盖列表；背景层固定 z-index，磨玻璃从 blur(28px)/inset -60px 调整为 blur(14px)/inset -18px。
+- **电源**：`shutdown.exe /s|/r /t N`、`/h` 休眠、`/a` 取消；定时开机依赖主板 RTC/BIOS，软件层只提供定时关机/重启。

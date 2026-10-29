@@ -38,6 +38,12 @@ public sealed class MediaViewerWindow : WebViewWindowBase
     }
 
     protected override bool InterceptEscape => true;
+
+    protected override void OnFullscreenChanged(bool fullscreen)
+    {
+        RunScript("window.dispatchEvent(new CustomEvent('moon-fullscreen',{detail:" +
+                  (fullscreen ? "true" : "false") + "}))");
+    }
     protected override bool EnableDefaultContextMenu => false;
     protected override WindowState GetSavedState(AppSettings s) => s.ViewWindow;
 

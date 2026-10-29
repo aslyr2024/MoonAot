@@ -31,7 +31,9 @@ const zoom = ref(1)
 const rotate = ref(0)
 const offsetX = ref(0)
 const offsetY = ref(0)
-const fitMode = ref<'contain' | 'width' | 'actual'>('contain')
+type FitMode = 'contain' | 'width' | 'height' | 'center' | 'actual'
+const fitMode = ref<FitMode>((['width', 'height', 'center', 'actual'].includes(state.settings.media.imageFitMode)
+  ? state.settings.media.imageFitMode : 'contain') as FitMode)
 const slideshow = ref(false)
 const comic = ref(state.settings.media.comicMode)
 const comicWidth = ref(state.settings.media.comicWidth)
@@ -41,7 +43,10 @@ const dragging = ref(false)
 const container = ref<HTMLElement | null>(null)
 const imageEl = ref<HTMLImageElement | null>(null)
 const showSlideSettings = ref(false)
+const immersive = ref(false)
 const bgmEl = ref<HTMLAudioElement | null>(null)
+const bgmTracks = ref<string[]>([])
+const bgmIndex = ref(0)
 const animClass = ref('')
 const imgBust = ref(0)
 const editorOpen = ref(false)
@@ -56,9 +61,11 @@ let sliderTimer: ReturnType<typeof setTimeout> | null = null
 
 const mediaSettings = computed(() => state.settings.media)
 const slideTransition = computed(() => mediaSettings.value.imageTransition || 'fade')
-const bgmSrc = computed(() => mediaSettings.value.imageBackgroundMusic
-  ? urls.media(mediaSettings.value.imageBackgroundMusic)
-  : '')
+const bgmFolder = computed(() => mediaSettings.value.imageBackgroundMusicFolder || '')
+const bgmTrack = computed(() => bgmTracks.value.length ? bgmTracks.value[Math.min(bgmIndex.value, bgmTracks.value.length - 1)] : '')
+const bgmSrc = computed(() => bgmTrack.value
+  ? urls.media(bgmTrack.value)
+  : (mediaSettings.value.imageBackgroundMusic ? urls.media(mediaSettings.value.imageBackgroundMusic) : ''))
 
 const folder = computed(() => rootFolder.value || dirname(current.value))
 const currentItem = computed<ImageItem | undefined>(() => index.value >= 0 ? items.get(index.value) : undefined)
@@ -77,6 +84,8 @@ const containerClass = computed(() => ({
   comic: comic.value,
   contain: !comic.value && fitMode.value === 'contain',
   width: !comic.value && fitMode.value === 'width',
+  height: !comic.value && fitMode.value === 'height',
+  center: !comic.value && fitMode.value === 'center',
   actual: !comic.value && fitMode.value === 'actual',
 }))
 const canPan = computed(() => zoom.value > 1 && !comic.value)
@@ -351,6 +360,30 @@ function resetZoom() {
   persistView()
 }
 
+function setFitMode(mode: FitMode) {
+  fitMode.value = mode
+  zoom.value = 1
+  offsetX.value = 0
+  offsetY.value = 0
+  dragging.value = false
+  void saveMedia({ imageFitMode: mode })
+}
+
+function toggleImmersive() {
+  immersive.value = !immersive.value
+  if (immersive.value) {
+    infoOpen.value = false
+    showSlideSettings.value = false
+  }
+  host.toggleFullscreen()
+}
+
+function onFullscreenEvent(ev: Event) {
+  const full = !!(ev as CustomEvent).detail
+  immersive.value = full
+  if (full) { infoOpen.value = false; showSlideSettings.value = false }
+}
+
 function maxOffset() {
   const stage = container.value
   const img = imageEl.value
@@ -447,7 +480,7 @@ function playTransition() {
 
 function startSlideTimer() {
   if (slideTimer) { clearInterval(slideTimer); slideTimer = null }
-  const seconds = Math.max(2, Number(mediaSettings.value.imageSlideSeconds) || 5)
+  const seconds = Math.max(0.1, Number(mediaSettings.value.imageSlideSeconds) || 5)
   slideTimer = setInterval(() => {
     if (!slideshow.value) return
     if (index.value >= total.value - 1) {
@@ -498,7 +531,7 @@ async function saveMedia(patch: Record<string, any>) {
 
 function setSlideSeconds(v: number | null) {
   if (v === null || !Number.isFinite(v)) return
-  void saveMedia({ imageSlideSeconds: clamp(Math.round(v), 2, 120) })
+  void saveMedia({ imageSlideSeconds: Math.round(clamp(v, 0.1, 60) * 10) / 10 })
 }
 
 function setTransition(v: 'none' | 'fade' | 'slide' | 'zoom') {
@@ -511,17 +544,50 @@ function setSlideLoop(v: boolean) {
 
 async function chooseBgm() {
   const file = await host.pickFile('audio', '选择幻灯片背景音乐')
-  if (file) await saveMedia({ imageBackgroundMusic: file })
+  if (!file) return
+  bgmTracks.value = []
+  bgmIndex.value = 0
+  await saveMedia({ imageBackgroundMusic: file, imageBackgroundMusicFolder: null, imageBackgroundMusicIndex: 0 })
+}
+
+async function chooseBgmFolder() {
+  const dir = await host.pickFolder('选择幻灯片背景音乐文件夹（递归）')
+  if (!dir) return
+  bgmTracks.value = []
+  bgmIndex.value = 0
+  await saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: dir, imageBackgroundMusicIndex: 0 })
+  await loadBgmFolder(dir)
+  if (!bgmTracks.value.length) toast('这个文件夹里没有音乐', 'warning')
+  else if (slideshow.value) playBgm()
+}
+
+async function loadBgmFolder(dir: string) {
+  if (!dir) { bgmTracks.value = []; bgmIndex.value = 0; return }
+  try {
+    const res = await api.fsScan(dir, 'audio', 20000)
+    bgmTracks.value = res.entries.filter(e => !e.isDir).map(e => e.path)
+    bgmIndex.value = clamp(mediaSettings.value.imageBackgroundMusicIndex || 0, 0, Math.max(0, bgmTracks.value.length - 1))
+  } catch { bgmTracks.value = []; bgmIndex.value = 0 }
+}
+
+function onBgmEnded() {
+  if (!bgmTracks.value.length) return
+  if (!slideshow.value) return
+  bgmIndex.value = (bgmIndex.value + 1) % bgmTracks.value.length
+  void saveMedia({ imageBackgroundMusicIndex: bgmIndex.value })
+  void nextTick(() => { bgmEl.value?.load(); playBgm() })
 }
 
 function clearBgm() {
   pauseBgm()
-  void saveMedia({ imageBackgroundMusic: null })
+  bgmTracks.value = []
+  bgmIndex.value = 0
+  void saveMedia({ imageBackgroundMusic: null, imageBackgroundMusicFolder: null, imageBackgroundMusicIndex: 0 })
 }
 
-const bgmName = computed(() => mediaSettings.value.imageBackgroundMusic
-  ? basename(mediaSettings.value.imageBackgroundMusic)
-  : '')
+const bgmName = computed(() => bgmTracks.value.length
+  ? `${basename(bgmFolder.value)} · ${bgmTracks.value.length} 首`
+  : (mediaSettings.value.imageBackgroundMusic ? basename(mediaSettings.value.imageBackgroundMusic) : ''))
 
 watch(bgmSrc, () => {
   if (slideshow.value) playBgm()
@@ -607,8 +673,8 @@ function onKey(ev: KeyboardEvent) {
   else if (ev.key === ' ') { ev.preventDefault(); toggleSlideshow() }
   else if (ev.key === 'Home') { void goTo(0) }
   else if (ev.key === 'End') { void goTo(total.value - 1) }
-  else if (ev.key === 'Escape') host.closeWindow()
-  else if (ev.key === 'F11') { ev.preventDefault(); host.toggleFullscreen() }
+  else if (ev.key === 'Escape') { if (immersive.value) toggleImmersive(); else host.closeWindow() }
+  else if (ev.key === 'F11') { ev.preventDefault(); toggleImmersive() }
 }
 
 function resetEmpty() {
@@ -663,7 +729,9 @@ onMounted(async () => {
     await restoreViewState()
     await load(current.value)
   }
+  if (mediaSettings.value.imageBackgroundMusicFolder) await loadBgmFolder(mediaSettings.value.imageBackgroundMusicFolder)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('moon-fullscreen', onFullscreenEvent as EventListener)
 })
 
 onBeforeUnmount(() => {
@@ -675,11 +743,12 @@ onBeforeUnmount(() => {
   if (folder.value)
     void api.saveMediaProgressKeepalive({ path: folder.value, kind: 'image', position: index.value, duration: total.value, scale: zoom.value, rotation: rotate.value })
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('moon-fullscreen', onFullscreenEvent as EventListener)
 })
 </script>
 
 <template>
-  <div class="viewer image-viewer">
+  <div class="viewer image-viewer" :class="{ immersive }">
     <header class="viewer-bar">
       <div class="viewer-left">
         <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="17" /></button>
@@ -699,7 +768,12 @@ onBeforeUnmount(() => {
           <button class="viewer-btn" title="缩小" @click="zoomBy(-0.15)"><minus :size="16" /></button>
           <span class="zoom-value">{{ Math.round(zoom * 100) }}%</span>
           <button class="viewer-btn" title="放大" @click="zoomBy(0.15)"><plus :size="16" /></button>
-          <button class="viewer-btn" title="适应窗口" @click="resetZoom"><scan :size="16" /></button>
+          <button class="viewer-btn" title="适应窗口" @click="setFitMode('contain')"><scan :size="16" /></button>
+          <n-select size="small" style="width: 132px" :consistent-menu-width="false" :menu-props="{ style: { minWidth: '144px' } }" :value="fitMode" :options="[
+            { label: '自动居中', value: 'center' }, { label: '适应窗口', value: 'contain' },
+            { label: '适应宽度', value: 'width' }, { label: '适应高度', value: 'height' },
+            { label: '原始大小', value: 'actual' },
+          ]" @update:value="setFitMode" />
           <button class="viewer-btn" title="向右旋转 90°" @click="rotateView(90)"><rotate-cw :size="16" /></button>
           <button class="viewer-btn" title="向左旋转 90°" @click="rotateView(-90)"><rotate-cw :size="16" style="transform: scaleX(-1)" /></button>
           <button class="viewer-btn" :class="{ active: slideshow }" title="幻灯片播放（空格）" @click="toggleSlideshow">
@@ -714,7 +788,7 @@ onBeforeUnmount(() => {
           <button class="viewer-btn" title="信息" @click="infoOpen = !infoOpen"><info :size="16" /></button>
         </template>
         <span class="bar-sep" />
-        <button class="viewer-btn" title="全屏" @click="host.toggleFullscreen()"><maximize :size="16" /></button>
+        <button class="viewer-btn" :class="{ active: immersive }" title="全屏（仅显示图片）" @click="toggleImmersive"><maximize :size="16" /></button>
       </div>
     </header>
 
@@ -737,11 +811,11 @@ onBeforeUnmount(() => {
         <span>间隔</span>
         <n-slider
           :value="mediaSettings.imageSlideSeconds"
-          :min="2" :max="60" :step="1"
+          :min="0.1" :max="60" :step="0.1"
           style="flex: 1"
           @update:value="setSlideSeconds"
         />
-        <b>{{ mediaSettings.imageSlideSeconds }}s</b>
+        <b>{{ Number(mediaSettings.imageSlideSeconds).toFixed(1) }}s</b>
       </div>
       <div class="ss-row">
         <span>过渡</span>
@@ -769,13 +843,14 @@ onBeforeUnmount(() => {
           <music :size="13" />
           <span>{{ bgmName || '未设置' }}</span>
         </div>
-        <button class="icon-btn subtle" title="选择音乐" @click="chooseBgm"><folder-open :size="14" /></button>
+        <button class="icon-btn subtle" title="选择背景音乐文件" @click="chooseBgm"><music :size="14" /></button>
+        <button class="icon-btn subtle" title="选择背景音乐文件夹（递归）" @click="chooseBgmFolder"><folder-open :size="14" /></button>
         <button v-if="bgmName" class="icon-btn subtle danger" title="清除背景音乐" @click="clearBgm"><trash2 :size="14" /></button>
       </div>
       <small class="ss-note">幻灯片播放时自动播放背景音乐；窗口静音由系统音量控制。</small>
     </div>
 
-    <audio ref="bgmEl" :src="bgmSrc" loop preload="auto" class="bgm-audio" />
+    <audio ref="bgmEl" :src="bgmSrc" :loop="bgmTracks.length <= 1" preload="auto" class="bgm-audio" @ended="onBgmEnded" />
 
     <div
       ref="container"

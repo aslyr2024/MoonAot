@@ -13,14 +13,14 @@ import VirtualGrid from '../components/VirtualGrid.vue'
 import BookDetail from '../components/BookDetail.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import type { MenuItem } from '../components/ContextMenu.vue'
-import { api, uploadBook, urls } from '../api'
+import { api, uploadBook } from '../api'
 import {
   finishImport, libraryTick, loadFacets, loadSettings, saveSettings, scheduleLibraryRefresh, state,
 } from '../store'
 import { host } from '../host'
 import { confirmDialog, toast, toastError } from '../ui'
 import {
-  basename, debounce, hashHue, isCoverCapable, percent, timeAgo,
+  basename, debounce, isCoverCapable,
 } from '../utils'
 import type { LibraryItem } from '../types'
 
@@ -40,7 +40,6 @@ const total = ref(0)
 const items = ref<(LibraryItem | undefined)[]>([])
 const loading = ref(true)
 const gridRef = ref<InstanceType<typeof VirtualGrid> | null>(null)
-const recent = ref<LibraryItem[]>([])
 const searchRef = ref<any>(null)
 
 const loadedPages = new Set<number>()
@@ -100,7 +99,6 @@ const subtitle = computed(() => {
   if (!f) return `${total.value} 本`
   return `${total.value} 本 · ${f.reading} 本在读 · ${f.favorites} 本收藏`
 })
-const recentList = computed(() => recent.value.slice(0, 12))
 
 function signature() {
   return [q.value.trim(), sort.value, desc.value ? 1 : 0, filter.value, format.value, author.value, folder.value].join('|')
@@ -166,10 +164,6 @@ function ensure(start: number, end: number) {
   if (p1 + 1 < Math.ceil(total.value / PAGE)) void loadPage(p1 + 1)
 }
 
-async function loadRecent() {
-  try { recent.value = await api.recent(12) } catch { /* ignore */ }
-}
-
 function reset() {
   generation++
   activeSig = signature()
@@ -180,7 +174,6 @@ function reset() {
   inflight.clear()
   gridRef.value?.scrollToTop()
   void loadPage(0, true)
-  void loadRecent()
   void loadFacets()
 }
 
@@ -188,7 +181,6 @@ async function refreshVisible() {
   const pages = [...loadedPages].sort((a, b) => a - b)
   if (!pages.length) { reset(); return }
   for (const p of pages) await loadPage(p, true)
-  void loadRecent()
   void loadFacets()
 }
 
@@ -301,13 +293,11 @@ function onItemFavorite(item: LibraryItem) {
 
 function onDetailChanged() {
   scheduleLibraryRefresh(120)
-  void loadRecent()
 }
 
 function onDeleted() {
   detailShow.value = false
   scheduleLibraryRefresh(0)
-  void loadRecent()
 }
 
 async function onCoverFile(ev: Event) {
@@ -455,10 +445,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
 })
 
-const recentStyles = (b: LibraryItem) => {
-  const h = hashHue(b.hash || b.title)
-  return { background: `radial-gradient(120% 100% at 20% 0%, hsl(${h} 42% 30%), hsl(${(h + 46) % 360} 36% 16%) 70%)` }
-}
 </script>
 
 <template>
@@ -550,32 +536,6 @@ const recentStyles = (b: LibraryItem) => {
       </div>
     </div>
 
-    <section v-if="recentList.length" class="recent-strip">
-      <div class="strip-head">
-        <h2>继续阅读</h2>
-        <button class="link-btn" @click="router.push({ name: 'recent' })">查看全部</button>
-      </div>
-      <div class="strip-scroll">
-        <button
-          v-for="b in recentList"
-          :key="b.hash"
-          class="recent-card"
-          :title="b.title"
-          @click="openItem(b)"
-          @contextmenu.prevent="openMenu(b, $event)"
-        >
-          <div class="recent-cover">
-            <img v-if="b.hasCover" :src="urls.thumb(b)" loading="lazy" decoding="async" alt="" />
-            <div v-else class="cov-ph mini" :style="recentStyles(b)">
-              <strong>{{ b.title }}</strong>
-            </div>
-            <span class="recent-pct">{{ percent(b.progress) }}%</span>
-          </div>
-          <div class="recent-title">{{ b.title }}</div>
-          <div class="recent-time">{{ timeAgo(b.updatedAt) }}</div>
-        </button>
-      </div>
-    </section>
 
     <div class="grid-wrap">
       <VirtualGrid

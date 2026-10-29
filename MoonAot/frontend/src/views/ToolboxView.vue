@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  Binary, Camera, Check, Clock3, Cpu, FileArchive, FileKey2, FolderOpen, HardDrive, Hash, ListTree,
-  MemoryStick, Network, Power, RefreshCw, Search, Trash2, Wrench, Zap,
+  AlarmClock, BedDouble, Binary, Camera, Check, Clock3, Cpu, FileArchive, FileKey2, FolderOpen, HardDrive, Hash, ListTree,
+  MemoryStick, Moon, Network, Power, RefreshCw, Search, Trash2, Wrench, Zap,
 } from 'lucide-vue-next'
-import { NButton, NInput, NSelect } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
 import { host } from '../host'
@@ -26,6 +26,7 @@ const algos = [
   { label: 'SHA-512', value: 'sha512' },
 ]
 
+const powerDelay = ref(30)
 const textIn = ref('')
 const textOut = ref('')
 
@@ -103,16 +104,26 @@ async function screenshot() {
   } catch (e) { toastError(e) }
 }
 
-async function powerAction(action: 'lock' | 'sleep' | 'screenoff' | 'shutdown' | 'restart') {
-  if (action === 'shutdown' || action === 'restart' || action === 'sleep') {
+async function powerAction(action: 'lock' | 'sleep' | 'hibernate' | 'screenoff' | 'shutdown' | 'restart' | 'cancel', delaySeconds = 0) {
+  if (action === 'shutdown' || action === 'restart' || action === 'sleep' || action === 'hibernate') {
+    const names: Record<string, string> = { shutdown: '关机', restart: '重启', sleep: '睡眠', hibernate: '休眠' }
     const ok = await confirmDialog({
-      title: action === 'shutdown' ? '关机' : action === 'restart' ? '重启' : '睡眠',
-      content: '请先保存所有工作，操作会立即执行。',
+      title: names[action] || '电源操作',
+      content: delaySeconds > 0 ? `将在 ${Math.round(delaySeconds / 60)} 分钟后执行，请先保存工作。` : '请先保存所有工作，操作会立即执行。',
       positiveText: '继续', danger: true,
     })
     if (!ok) return
   }
-  try { await api.power(action); toast('操作已发送') } catch (e) { toastError(e) }
+  try {
+    const r: any = await api.power(action, delaySeconds)
+    if (r && r.ok === false) toast(r.error || '操作失败', 'error')
+    else toast(delaySeconds > 0 ? `已定时：${Math.round(delaySeconds / 60)} 分钟后执行` : '操作已发送')
+  } catch (e) { toastError(e) }
+}
+
+async function schedulePower(kind: 'shutdown' | 'restart') {
+  const minutes = Math.max(1, Math.round(Number(powerDelay.value) || 1))
+  await powerAction(kind, minutes * 60)
 }
 
 async function pickArchiveFolder() {
@@ -312,11 +323,21 @@ onMounted(loadSystem)
         <div class="power-grid">
           <n-button @click="powerAction('lock')"><template #icon><zap :size="14" /></template>锁屏</n-button>
           <n-button @click="powerAction('screenoff')"><template #icon><power :size="14" /></template>关闭屏幕</n-button>
-          <n-button @click="powerAction('sleep')"><template #icon><power :size="14" /></template>睡眠</n-button>
           <n-button @click="screenshot"><template #icon><camera :size="14" /></template>全屏截图</n-button>
-          <n-button type="error" secondary @click="powerAction('restart')">重启</n-button>
-          <n-button type="error" @click="powerAction('shutdown')">关机</n-button>
+          <n-button @click="powerAction('sleep')"><template #icon><moon :size="14" /></template>睡眠</n-button>
+          <n-button @click="powerAction('hibernate')"><template #icon><bed-double :size="14" /></template>休眠</n-button>
+          <n-button type="error" secondary @click="powerAction('restart')">立即重启</n-button>
+          <n-button type="error" @click="powerAction('shutdown')">立即关机</n-button>
         </div>
+        <div class="power-schedule">
+          <n-input-number v-model:value="powerDelay" :min="1" :max="1440" size="small" style="width: 120px">
+            <template #suffix>分钟</template>
+          </n-input-number>
+          <n-button size="small" @click="schedulePower('shutdown')"><template #icon><alarm-clock :size="14" /></template>定时关机</n-button>
+          <n-button size="small" type="warning" secondary @click="schedulePower('restart')"><template #icon><alarm-clock :size="14" /></template>定时重启</n-button>
+          <n-button size="small" secondary @click="powerAction('cancel')">取消定时</n-button>
+        </div>
+        <p class="tool-note">睡眠/休眠需要系统与硬件支持；定时开机依赖主板 RTC/BIOS 或 Windows 唤醒定时器，本工具只负责定时关机/重启。</p>
         <div v-if="shotPath" class="hash-result">
           <div class="hash-name"><camera :size="14" /><span>{{ shotPath }}</span></div>
           <n-button size="small" @click="host.reveal(shotPath)"><template #icon><folder-open :size="13" /></template>打开所在目录</n-button>
@@ -387,6 +408,7 @@ onMounted(loadSystem)
 .mini:hover { background: var(--panel-3); color: var(--text); }
 .mini.dangerous:hover { background: rgba(255,107,129,.14); color: var(--danger); }
 .power-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.power-schedule { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 9px; }
 .site-empty { padding: 20px 8px; text-align: center; color: var(--text-3); font-size: 11px; }
 @media (max-width: 1000px) {
   .toolbox-grid { grid-template-columns: 1fr; }

@@ -360,6 +360,9 @@ public abstract class WebViewWindowBase : Window
 
     protected virtual void OnEscape() { }
 
+    /// <summary>原生全屏状态变化（F11/Esc/按钮均可通知前端）。</summary>
+    protected virtual void OnFullscreenChanged(bool fullscreen) { }
+
     protected override bool OnFocusChanged(bool setOrKill)
     {
         if (setOrKill)
@@ -451,6 +454,7 @@ public abstract class WebViewWindowBase : Window
                 mi.rcMonitor.Width, mi.rcMonitor.Height,
                 SWP_FRAMECHANGED | SWP_NOZORDER | SWP_SHOWWINDOW);
             _isFullscreen = true;
+            OnFullscreenChanged(true);
         }
         catch (Exception ex) { Log.Warn("进入全屏失败: " + ex.Message); }
     }
@@ -467,6 +471,7 @@ public abstract class WebViewWindowBase : Window
             _isFullscreen = false;
             try { if (Controller != null) Controller.Bounds = ClientRect; } catch { }
             SetFocus();
+            OnFullscreenChanged(false);
         }
         catch (Exception ex) { Log.Warn("退出全屏失败: " + ex.Message); }
     }

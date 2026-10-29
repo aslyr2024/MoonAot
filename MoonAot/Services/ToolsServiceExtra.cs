@@ -127,7 +127,7 @@ public static partial class ToolsService
         catch (Exception ex) { error = ex.Message; return null; }
     }
 
-    public static bool Power(string action, out string error)
+    public static bool Power(string action, int delaySeconds, out string error)
     {
         error = "";
         try
@@ -143,12 +143,38 @@ public static partial class ToolsService
                 case "sleep":
                     Process.Start(new ProcessStartInfo("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0") { UseShellExecute = false, CreateNoWindow = true });
                     return true;
+                case "hibernate":
+                    {
+                        var p = Process.Start(new ProcessStartInfo("shutdown.exe", "/h") { UseShellExecute = false, CreateNoWindow = true });
+                        if (p != null && p.WaitForExit(2500) && p.ExitCode != 0)
+                        {
+                            error = "休眠失败：系统可能未启用休眠（powercfg /hibernate on）";
+                            return false;
+                        }
+                        return true;
+                    }
                 case "shutdown":
-                    Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 0") { UseShellExecute = false, CreateNoWindow = true });
-                    return true;
+                    {
+                        delaySeconds = Math.Clamp(delaySeconds, 0, 7 * 24 * 3600);
+                        Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t " + delaySeconds) { UseShellExecute = false, CreateNoWindow = true });
+                        return true;
+                    }
                 case "restart":
-                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false, CreateNoWindow = true });
-                    return true;
+                    {
+                        delaySeconds = Math.Clamp(delaySeconds, 0, 7 * 24 * 3600);
+                        Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t " + delaySeconds) { UseShellExecute = false, CreateNoWindow = true });
+                        return true;
+                    }
+                case "cancel":
+                    {
+                        var p = Process.Start(new ProcessStartInfo("shutdown.exe", "/a") { UseShellExecute = false, CreateNoWindow = true });
+                        if (p != null && p.WaitForExit(2000) && p.ExitCode != 0)
+                        {
+                            error = "没有可取消的定时关机";
+                            return false;
+                        }
+                        return true;
+                    }
                 default:
                     error = "未知电源操作";
                     return false;

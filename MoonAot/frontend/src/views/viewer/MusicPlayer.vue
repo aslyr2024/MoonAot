@@ -492,10 +492,10 @@ async function loadPlaylist(p: PlaylistSummary) {
   try {
     const rec = await api.playlist(p.id)
     if (!rec.items.length) { toast('播放列表为空', 'warning'); return }
-    playlistId.value = rec.id
-    const target = rec.items[Math.min(rec.current, rec.items.length - 1)]
-    path.value = target
-    await loadTracks(target)
+    const items: ImageItem[] = rec.items.map(x => ({ name: basename(x), path: x, size: 0 }))
+    // 直接使用刚载入的列表，避免 loadTracks 又从旧路由 query 覆盖回上一个列表
+    await loadQueue(items, rec.current, rec, true)
+    toast(`已载入播放列表：${rec.name}`)
   } catch (e) { toastError(e) }
 }
 

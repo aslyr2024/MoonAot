@@ -10,7 +10,10 @@ export interface MediaSettings {
   musicShowLyrics: boolean
   videoAutoResume: boolean
   imageTransition: 'none' | 'fade' | 'slide' | 'zoom'
+  imageFitMode?: 'contain' | 'width' | 'height' | 'center' | 'actual'
   imageBackgroundMusic?: string | null
+  imageBackgroundMusicFolder?: string | null
+  imageBackgroundMusicIndex?: number
   imageSlideLoop: boolean
   musicVolume: number
   musicMode: 'order' | 'repeat' | 'shuffle'
@@ -19,6 +22,7 @@ export interface MediaSettings {
   videoShowList: boolean
   musicBackgroundFolder?: string | null
   musicBackgroundIndex: number
+  imageLastFolder?: string | null
 }
 
 export interface AppSettings {

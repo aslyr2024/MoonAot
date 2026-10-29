@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading.Tasks;
 using MoonAot.Server;
 using MoonAot.Services;
 using MoonAot.Store;
@@ -14,6 +15,7 @@ public sealed class ReaderWindow : WebViewWindowBase
     public string BookId { get; private set; }
 
     private static readonly string[] Empty = Array.Empty<string>();
+    private long _lastSwitchTick;
 
     public ReaderWindow(string bookId, string title) : base(string.IsNullOrWhiteSpace(title) ? "阅读" : title)
     {
@@ -27,7 +29,45 @@ public sealed class ReaderWindow : WebViewWindowBase
 
     protected override void OnWebViewCreated()
     {
-        NavigateReader();
+        _ = InitReaderAsync();
+    }
+
+    private async Task InitReaderAsync()
+    {
+        try
+        {
+            if (Web != null)
+                await Web.AddScriptToExecuteOnDocumentCreatedAsync("""
+                    (() => {
+                      const send = (type) => {
+                        try {
+                          if (window.chrome && window.chrome.webview) {
+                            window.chrome.webview.postMessage(JSON.stringify({ type }));
+                          } else if (window.top && window.top !== window) {
+                            window.top.postMessage({ __moonReaderKey: type }, '*');
+                          }
+                        } catch (_) {}
+                      };
+                      if (window === window.top) {
+                        window.addEventListener('message', (e) => {
+                          if (e && e.data && e.data.__moonReaderKey) send(e.data.__moonReaderKey);
+                        });
+                      }
+                      document.addEventListener('keydown', (e) => {
+                        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+                        const t = e.target;
+                        const tag = (t && t.tagName || '').toLowerCase();
+                        if (tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        send(e.key === 'ArrowUp' ? 'prevBook' : 'nextBook');
+                      }, true);
+                    })();
+                    """);
+        }
+        catch (Exception ex) { Log.Warn("阅读器按键注入失败: " + ex.Message); }
+        if (!IsDisposed && !IsDisposing) NavigateReader();
     }
 
     private void NavigateReader()
@@ -78,6 +118,10 @@ public sealed class ReaderWindow : WebViewWindowBase
 
     private void SwitchBook(int dir)
     {
+        // JS 注入与原生加速键可能同时触发，250ms 内只接受一次
+        var now = Environment.TickCount64;
+        if (now - _lastSwitchTick < 250) return;
+        _lastSwitchTick = now;
         try
         {
             var ids = DbStore.Instance.TitleOrder();

@@ -889,13 +889,13 @@ public sealed partial class MoonServer
             if (root.TryGetProperty("autoRefreshLibrary", out var ar) && ar.ValueKind is JsonValueKind.True or JsonValueKind.False) s.AutoRefreshLibrary = ar.GetBoolean();
             if (root.TryGetProperty("media", out var media) && media.ValueKind == JsonValueKind.Object)
             {
-                if (media.TryGetProperty("imageSlideSeconds", out var v) && v.TryGetInt32(out var n)) s.Media.ImageSlideSeconds = Math.Clamp(n, 1, 120);
+                if (media.TryGetProperty("imageSlideSeconds", out var v) && v.TryGetDouble(out var slidev)) s.Media.ImageSlideSeconds = Math.Clamp(slidev, 0.1, 60);
                 if (media.TryGetProperty("comicMode", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.ComicMode = v.GetBoolean();
                 var cw = GetString(media, "comicWidth");
                 if (cw is "full" or "2/3" or "1/2" or "default") s.Media.ComicWidth = cw;
                 if (media.TryGetProperty("comicAutoPage", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.ComicAutoPage = v.GetBoolean();
                 if (media.TryGetProperty("recursiveImages", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.RecursiveImages = v.GetBoolean();
-                if (media.TryGetProperty("musicBackgroundSeconds", out v) && v.TryGetInt32(out n)) s.Media.MusicBackgroundSeconds = Math.Clamp(n, 1, 60);
+                if (media.TryGetProperty("musicBackgroundSeconds", out v) && v.TryGetInt32(out var n)) s.Media.MusicBackgroundSeconds = Math.Clamp(n, 1, 60);
                 if (media.TryGetProperty("musicShowLyrics", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.MusicShowLyrics = v.GetBoolean();
                 if (media.TryGetProperty("videoAutoResume", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False) s.Media.VideoAutoResume = v.GetBoolean();
                 var tr = GetString(media, "imageTransition");
@@ -919,6 +919,14 @@ public sealed partial class MoonServer
                     s.Media.MusicBackgroundFolder = string.IsNullOrWhiteSpace(bgf) ? null : bgf;
                 }
                 if (media.TryGetProperty("musicBackgroundIndex", out v) && v.TryGetInt32(out var bgi)) s.Media.MusicBackgroundIndex = Math.Max(0, bgi);
+                var fm = GetString(media, "imageFitMode");
+                if (fm is "contain" or "width" or "height" or "center" or "actual") s.Media.ImageFitMode = fm;
+                if (media.TryGetProperty("imageBackgroundMusicFolder", out v) && v.ValueKind == JsonValueKind.String)
+                {
+                    var bmf = v.GetString();
+                    s.Media.ImageBackgroundMusicFolder = string.IsNullOrWhiteSpace(bmf) ? null : bmf;
+                }
+                if (media.TryGetProperty("imageBackgroundMusicIndex", out v) && v.TryGetInt32(out var bmi)) s.Media.ImageBackgroundMusicIndex = Math.Max(0, bmi);
                 if (media.TryGetProperty("imageLastFolder", out v) && v.ValueKind == JsonValueKind.String)
                 {
                     var ilf = v.GetString();
@@ -1767,8 +1775,11 @@ public sealed partial class MoonServer
                 {
                     using var body = ReadJson(req);
                     var powerAction = body == null ? null : GetString(body.RootElement, "action");
+                    int delaySeconds = 0;
+                    if (body != null && body.RootElement.TryGetProperty("delaySeconds", out var ds) && ds.TryGetInt32(out var dsv))
+                        delaySeconds = dsv;
                     string err = "";
-                    var ok = !string.IsNullOrEmpty(powerAction) && ToolsService.Power(powerAction!, out err);
+                    var ok = !string.IsNullOrEmpty(powerAction) && ToolsService.Power(powerAction!, delaySeconds, out err);
                     SendJson(ctx, ok ? 200 : 400, new OkDto { Ok = ok, Error = ok ? null : err });
                     return;
                 }

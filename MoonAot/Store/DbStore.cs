@@ -1496,7 +1496,7 @@ WHERE n.deleted_at IS NULL
                 s.ReadingSeconds = L("reading_seconds");
                 s.Media = new MediaSettings
                 {
-                    ImageSlideSeconds = (int)Math.Clamp(L("media_image_slide_seconds"), 1, 120),
+                    ImageSlideSeconds = SlideSeconds(D("media_image_slide_seconds")),
                     ComicMode = B("media_comic_mode"),
                     ComicWidth = Empty(S("media_comic_width"), "default"),
                     ComicAutoPage = B("media_comic_auto_page"),
@@ -1505,6 +1505,9 @@ WHERE n.deleted_at IS NULL
                     MusicShowLyrics = B("media_music_show_lyrics"),
                     VideoAutoResume = B("media_video_auto_resume"),
                     ImageTransition = Empty(S("media_image_transition"), "fade"),
+                    ImageFitMode = Empty(S("media_image_fit"), "contain"),
+                    ImageBackgroundMusicFolder = S("media_image_bgm_folder").Length == 0 ? null : S("media_image_bgm_folder"),
+                    ImageBackgroundMusicIndex = Math.Max(0, (int)L("media_image_bgm_index")),
                     ImageBackgroundMusic = S("media_image_bgm").Length == 0 ? null : S("media_image_bgm"),
                     ImageSlideLoop = L("media_image_slide_loop") != 0,
                     MusicVolume = Math.Clamp(D("media_music_volume"), 0, 1),
@@ -1555,6 +1558,8 @@ WHERE n.deleted_at IS NULL
 
     private static string Empty(string v, string fallback) => string.IsNullOrWhiteSpace(v) ? fallback : v;
 
+    private static double SlideSeconds(double v) => v <= 0 ? 5 : Math.Clamp(v, 0.1, 60);
+
     public void UpdateAppSettings(Action<AppSettings> mutate) => UpdateAppSettingsCore(mutate);
 
     public void UpdateAppSettingsDeferred(Action<AppSettings> mutate) => UpdateAppSettingsCore(mutate);
@@ -1593,7 +1598,8 @@ UPDATE app_settings SET
  media_image_transition=$m9, media_image_bgm=$m10, media_image_slide_loop=$m11,
  media_music_volume=$m12, media_music_mode=$m13, media_music_tab=$m14,
  media_video_volume=$m15, media_video_show_list=$m16,
- media_music_bg_folder=$m17, media_music_bg_index=$m18, media_image_last_folder=$m19
+ media_music_bg_folder=$m17, media_music_bg_index=$m18, media_image_last_folder=$m19,
+ media_image_fit=$m20, media_image_bgm_folder=$m21, media_image_bgm_index=$m22
 WHERE id=1;
 """, tx))
         {
@@ -1635,6 +1641,9 @@ WHERE id=1;
             P(cmd, "$m17", m.MusicBackgroundFolder);
             P(cmd, "$m18", m.MusicBackgroundIndex);
             P(cmd, "$m19", m.ImageLastFolder);
+            P(cmd, "$m20", m.ImageFitMode is "width" or "height" or "center" or "actual" ? m.ImageFitMode : "contain");
+            P(cmd, "$m21", m.ImageBackgroundMusicFolder);
+            P(cmd, "$m22", Math.Max(0, m.ImageBackgroundMusicIndex));
             cmd.ExecuteNonQuery();
         }
         using (var del = Cmd(cn, "DELETE FROM recent_folders;", tx)) del.ExecuteNonQuery();
