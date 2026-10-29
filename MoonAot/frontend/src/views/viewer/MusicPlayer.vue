@@ -52,7 +52,6 @@ const bgFit = ref<'cover' | 'contain' | 'stretch' | 'center'>(
     ? state.settings.media.musicBackgroundFit : 'cover')
 const bgBlur = ref(clamp(Number(state.settings.media.musicBackgroundBlur ?? 5), 0, 10))
 const showBgSettings = ref(false)
-const lyricsBox = ref<HTMLElement | null>(null)
 
 let progressSaveAt = 0
 let bgTimer: ReturnType<typeof setInterval> | null = null
@@ -299,14 +298,19 @@ function updateActiveLine() {
     const mid = (lo + hi) >> 1
     if (lines[mid].t <= currentTime.value + 0.05) { ans = mid; lo = mid + 1 } else hi = mid - 1
   }
-  if (ans !== activeLine.value) {
-    activeLine.value = ans
-    nextTick(() => {
-      const el = lyricsBox.value?.querySelector('.lyric-line.active') as HTMLElement | null
-      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    })
-  }
+  if (ans !== activeLine.value) activeLine.value = ans
 }
+
+const lyricView = computed(() => {
+  const lines = lyrics.value?.lines
+  if (!lines?.length) return null
+  const i = activeLine.value >= 0 ? Math.min(activeLine.value, lines.length - 1) : 0
+  return {
+    prev: i > 0 ? lines[i - 1] : null,
+    current: lines[i],
+    next: i + 1 < lines.length ? lines[i + 1] : null,
+  }
+})
 
 function saveProgress(keepalive: boolean) {
   const t = current.value
@@ -626,6 +630,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="viewer music-viewer">
+    <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
+    <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
+    <div class="music-veil" />
     <header class="viewer-bar music-bar">
       <div class="viewer-left">
         <button class="viewer-btn" title="关闭" @click="host.closeWindow()"><x :size="17" /></button>
@@ -787,25 +794,22 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="music-right">
-        <div class="music-bg" :class="{ hide: bgFading }" :style="bgLayerStyle(bgUrl)" />
-        <div class="music-bg next" :class="{ show: bgFading }" :style="bgLayerStyle(bgNext)" />
-        <div class="music-right-veil" />
         <div class="music-right-head">
-          <strong>歌词</strong>
+          <span class="music-right-label">歌词</span>
           <span class="music-right-count">{{ bgUrls.length ? `${bgIndex + 1} / ${bgUrls.length}` : '无背景图' }}</span>
         </div>
-        <div ref="lyricsBox" class="lyrics-panel music-lyrics">
-          <template v-if="lyrics?.lines?.length">
-            <p
-              v-for="(l, i) in lyrics.lines"
-              :key="i"
-              class="lyric-line"
-              :class="{ active: i === activeLine }"
-              @click="seek(l.t)"
-            >{{ l.text }}</p>
+        <div class="lyric-stage">
+          <template v-if="lyricView">
+            <Transition name="lyric" mode="out-in">
+              <div :key="activeLine" class="lyric-focus">
+                <p class="lyric-context prev">{{ lyricView.prev?.text || '' }}</p>
+                <p class="lyric-current" @click="lyricView.current && seek(lyricView.current.t)">{{ lyricView.current?.text || '♪' }}</p>
+                <p class="lyric-context next">{{ lyricView.next?.text || '' }}</p>
+              </div>
+            </Transition>
           </template>
-          <pre v-else-if="lyrics?.plain" class="lyrics-plain">{{ lyrics.plain }}</pre>
-          <p v-else class="lyrics-empty">暂无歌词。可将同名 .lrc 文件放在音乐目录，或联网自动获取。</p>
+          <pre v-else-if="lyrics?.plain" class="lyrics-plain lyric-plain-center">{{ lyrics.plain }}</pre>
+          <p v-else class="lyrics-empty lyric-empty-center">暂无歌词。可将同名 .lrc 文件放在音乐目录，或联网自动获取。</p>
         </div>
         <div class="music-bg-bar">
           <button class="viewer-btn" title="上一张背景" @click="stepBg(-1)"><skip-back :size="15" /></button>
