@@ -108,24 +108,43 @@ ORDER BY b.added_at,c.ord,k.ord;
         var books = dsl.Books.Count > 0 ? new HashSet<string>(dsl.Books, StringComparer.Ordinal) : null;
         int limit = Math.Clamp(dsl.Limit <= 0 ? 50 : dsl.Limit, 1, 300);
 
-        // 空关键词 + 类型/分类：进入“分类浏览”，而不是直接返回空结果
+        // 空关键词：直接 SQL 分页浏览全部条目，避免把 3 万多条概念全部加载进内存再排序
         if (q.Length == 0)
         {
-            if (dsl.Types.Count > 0 || tagFilter.Active)
+            using var cn = MedDatabase.Instance.Open();
+            var where = new List<string> { "COALESCE(deleted,0)=0" };
+            if (dsl.Types.Count > 0)
+                where.Add("type IN (" + string.Join(",", dsl.Types.Select((_, i) => "$ty" + i)) + ")");
+            if (dsl.Tags.Count > 0)
             {
-                IEnumerable<MedConcepts.ConceptLite> seq = MedConcepts.All();
-                if (dsl.Types.Count > 0)
-                    seq = seq.Where(c => dsl.Types.Contains(c.Type, StringComparer.OrdinalIgnoreCase));
-                if (tagFilter.Active)
-                    seq = seq.Where(c => tagFilter.ConceptIds.Contains(c.Id));
-                var list = seq.OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Name, StringComparer.Ordinal)
-                    .Take(limit).Select(MedConcepts.ToDto).ToList();
-                result.Concepts = list;
-                result.ConceptTotal = list.Count;
-                result.Total = list.Count;
-                result.Mode = "browse";
-                result.TookMs = sw.ElapsedMilliseconds;
+                where.Add("id IN (SELECT target_id FROM med_tagged WHERE target_type='concept' AND tag_id IN (" +
+                          string.Join(",", dsl.Tags.Select((_, i) => "$tg" + i)) + "))");
             }
+            var whereSql = " WHERE " + string.Join(" AND ", where);
+            using (var cnt = Cmd(cn, "SELECT COUNT(*) FROM med_concepts" + whereSql + ";"))
+            {
+                for (int i = 0; i < dsl.Types.Count; i++) P(cnt, "$ty" + i, dsl.Types[i]);
+                for (int i = 0; i < dsl.Tags.Count; i++) P(cnt, "$tg" + i, dsl.Tags[i]);
+                result.ConceptTotal = Convert.ToInt32(cnt.ExecuteScalar() ?? 0);
+            }
+            using (var cmd = Cmd(cn, "SELECT id,type,name,name_norm,pinyin,initials,category,summary,source,edited FROM med_concepts" +
+                whereSql + " ORDER BY category,name LIMIT $l OFFSET $o;"))
+            {
+                for (int i = 0; i < dsl.Types.Count; i++) P(cmd, "$ty" + i, dsl.Types[i]);
+                for (int i = 0; i < dsl.Tags.Count; i++) P(cmd, "$tg" + i, dsl.Tags[i]);
+                P(cmd, "$l", limit); P(cmd, "$o", Math.Max(0, dsl.Offset));
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    result.Concepts.Add(MedConcepts.ToDto(new MedConcepts.ConceptLite
+                    {
+                        Id = r.GetString(0), Type = r.GetString(1), Name = r.GetString(2), NameNorm = r.GetString(3),
+                        Pinyin = r.GetString(4), Initials = r.GetString(5), Category = r.GetString(6),
+                        Summary = r.GetString(7), Source = r.GetString(8), Edited = r.GetInt32(9), DataJson = "{}",
+                    }));
+            }
+            result.Total = result.ConceptTotal;
+            result.Mode = "browse";
+            result.TookMs = sw.ElapsedMilliseconds;
             return result;
         }
         var terms = MedText.SplitTerms(q);

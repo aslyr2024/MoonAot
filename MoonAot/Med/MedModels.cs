@@ -117,6 +117,19 @@ public class MedChapterViewDto
     public List<MedConceptDto> Concepts { get; set; } = new();
     public List<MedNoteDto> Backlinks { get; set; } = new();
     public List<MedChapterDto> Siblings { get; set; } = new();
+    public List<MedAnchorDto> Anchors { get; set; } = new();
+}
+
+public class MedAnchorDto
+{
+    public string Id { get; set; } = "";
+    public string BookId { get; set; } = "";
+    public string ChapterId { get; set; } = "";
+    public string ChunkId { get; set; } = "";
+    public int PStart { get; set; }
+    public string Label { get; set; } = "";
+    public string Note { get; set; } = "";
+    public long CreatedAt { get; set; }
 }
 
 public class MedConceptDto
@@ -132,6 +145,7 @@ public class MedConceptDto
     public string DataJson { get; set; } = "{}";
     public string Summary { get; set; } = "";
     public string Source { get; set; } = "";
+    public int Edited { get; set; }
     public int Hits { get; set; }
     public List<MedHitDto> Occurrences { get; set; } = new();
     public List<MedConceptDto> Related { get; set; } = new();
@@ -334,6 +348,8 @@ public class MedDocTemplateContent
 [JsonSerializable(typeof(MedChapterDto))]
 [JsonSerializable(typeof(List<MedChapterDto>))]
 [JsonSerializable(typeof(MedChapterViewDto))]
+[JsonSerializable(typeof(MedAnchorDto))]
+[JsonSerializable(typeof(List<MedAnchorDto>))]
 [JsonSerializable(typeof(MedConceptDto))]
 [JsonSerializable(typeof(List<MedConceptDto>))]
 [JsonSerializable(typeof(MedHitDto))]

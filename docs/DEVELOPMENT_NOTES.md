@@ -211,3 +211,13 @@
 - 界面：`MedView.vue` 重构为 4 页签 + 右侧详情；新增欢迎页、分类 browse、原文分页、收藏详情接口、注释编辑、图谱概念定位、数据与设置/使用说明弹窗。
 - 可读化：`TaggedItems` 把 target 解析为标题/类型/父章节；前端收藏列表不再显示原始 id。
 - 验证：分类计数非 0；空关键词分类浏览 47 张卡；原文 60→90 加载更多；图谱定位「阿莫西林胶囊」；注释编辑后库中仍只有 1 条；模板预览前后数量不变；Markdown 章节 HTML 含 `data-p`。
+
+## 30. v1.2.0 自定义知识层、章节翻页与药品说明书
+
+- 空白检索：SQL `COUNT + ORDER BY category,name LIMIT/OFFSET`，不再把 3 万多概念加载后排序；前端首屏自动浏览并可加载更多。
+- 模板编辑：预览弹窗新增「编辑」，`SaveTemplate` 带 id 更新；新建入口会清空 editing id。
+- 章节翻页：原按钮只改 URL，正文依赖 query watcher；改为 `goChapter()` 直接加载 + `router.replace`，并用 skip 标记避免二次加载；无命中段落时滚动回顶部。
+- 自定义知识层：新增 `med_anchors` 表；概念保存支持 id upsert、`edited/deleted` 软保护；clinical 重导入跳过 edited/deleted；选中文字可建概念/锚点，概念按 chapter+pStart 反查 chunk 写 `med_hits`，立即出现在本章概念。
+- 说明书导入：7 XLSX 共 114,335 行，按通用名归一 + 规格含量 token 去重，保留正文字段总长最大者；32,784 条写入 `type=leaflet`，分类“药品说明书”，附 32,784 条 tag 关系。
+- 性能：`All()` 热层不加载 data_json（说明书约 100MB），详情按需读取；增加 `ix_med_hits_chunk`、`ix_med_concepts_hot/browse` 覆盖索引；分类补齐前先比较已挂接数量，避免每次启动写 3 万行。
+- 验证：空白浏览 35,229 条、首屏 60，21ms；`依非韦伦片 50mg` 命中，说明书 22 章节、目录跳转；自定义概念保存后本章概念立即出现；模板编辑原地更新；上一节/下一节 crumb 与正文均变化。

@@ -18,7 +18,7 @@ public static class MedStore
 
     public const string FavoriteTagId = "med-favorite";
     /// <summary>医学助手版本，随应用版本一起发布；显示在页面标题与使用说明中。</summary>
-    public const string MedVersion = "1.1.0";
+    public const string MedVersion = "1.2.0";
 
     /// <summary>内置数据源默认位置（机器相关）；状态接口会返回是否存在，前端据此决定“一键导入”是否可用。</summary>
     public static readonly (string Path, string Volume)[] DefaultBookSources =
@@ -132,6 +132,57 @@ SELECT n.* FROM med_notes n WHERE n.id IN (
         using var r = cmd.ExecuteReader();
         while (r.Read()) list.Add(ReadNote(r));
         return list;
+    }
+
+    // ---------------- anchors（用户自建段落锚点） ----------------
+
+    public static List<MedAnchorDto> Anchors(string chapterId = "", string bookId = "", int limit = 300)
+    {
+        var list = new List<MedAnchorDto>();
+        using var cn = MedDatabase.Instance.Open();
+        var where = new List<string>();
+        if (!string.IsNullOrEmpty(chapterId)) where.Add("chapter_id=$ch");
+        if (!string.IsNullOrEmpty(bookId)) where.Add("book_id=$b");
+        using var cmd = Cmd(cn, "SELECT id,book_id,chapter_id,chunk_id,p_start,label,note,created_at FROM med_anchors " +
+            (where.Count > 0 ? "WHERE " + string.Join(" AND ", where) + " " : "") +
+            "ORDER BY created_at DESC LIMIT $l;");
+        if (!string.IsNullOrEmpty(chapterId)) P(cmd, "$ch", chapterId);
+        if (!string.IsNullOrEmpty(bookId)) P(cmd, "$b", bookId);
+        P(cmd, "$l", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(new MedAnchorDto
+        {
+            Id = r.GetString(0), BookId = r.GetString(1), ChapterId = r.GetString(2), ChunkId = r.GetString(3),
+            PStart = r.GetInt32(4), Label = r.GetString(5), Note = r.GetString(6), CreatedAt = r.GetInt64(7),
+        });
+        return list;
+    }
+
+    public static string SaveAnchor(MedAnchorDto a)
+    {
+        var db = MedDatabase.Instance;
+        lock (db.SyncRoot)
+        {
+            using var cn = db.Open();
+            if (string.IsNullOrEmpty(a.Id)) a.Id = MedEpub.NewId("a");
+            if (a.CreatedAt == 0) a.CreatedAt = Now;
+            using var cmd = Cmd(cn, "INSERT OR REPLACE INTO med_anchors(id,book_id,chapter_id,chunk_id,p_start,label,note,created_at) VALUES($id,$b,$ch,$k,$p,$l,$n,$t);");
+            P(cmd, "$id", a.Id); P(cmd, "$b", a.BookId); P(cmd, "$ch", a.ChapterId); P(cmd, "$k", a.ChunkId);
+            P(cmd, "$p", a.PStart); P(cmd, "$l", a.Label); P(cmd, "$n", a.Note); P(cmd, "$t", a.CreatedAt);
+            cmd.ExecuteNonQuery();
+            return a.Id;
+        }
+    }
+
+    public static void DeleteAnchor(string id)
+    {
+        var db = MedDatabase.Instance;
+        lock (db.SyncRoot)
+        {
+            using var cn = db.Open();
+            using var cmd = Cmd(cn, "DELETE FROM med_anchors WHERE id=$id;");
+            P(cmd, "$id", id); cmd.ExecuteNonQuery();
+        }
     }
 
     // ---------------- tags / favorites ----------------
@@ -422,7 +473,8 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
             { c0.Transaction = tx; P(c0, "$b", id); c0.ExecuteNonQuery(); }
             foreach (var sql in new[]
             {
-                "DELETE FROM med_hits WHERE book_id=$b;", "DELETE FROM med_chunks WHERE book_id=$b;",
+                "DELETE FROM med_hits WHERE book_id=$b;", "DELETE FROM med_anchors WHERE book_id=$b;",
+                "DELETE FROM med_chunks WHERE book_id=$b;",
                 "DELETE FROM med_chapters WHERE book_id=$b;", "DELETE FROM med_books WHERE id=$b;",
             })
             {
@@ -517,6 +569,7 @@ SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf
             }
         }
         view.Backlinks = Backlinks("chapter", chapterId);
+        view.Anchors = Anchors(chapterId);
         return view;
     }
 
@@ -567,7 +620,10 @@ SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf
             ("med_templates", v => s.Templates = (int)v), ("med_links", v => s.Links = (int)v),
         })
         {
-            using var cmd = Cmd(cn, "SELECT COUNT(*) FROM " + table + ";");
+            var sql = table == "med_concepts"
+                ? "SELECT COUNT(*) FROM med_concepts WHERE COALESCE(deleted,0)=0;"
+                : "SELECT COUNT(*) FROM " + table + ";";
+            using var cmd = Cmd(cn, sql);
             set(Convert.ToInt64(cmd.ExecuteScalar() ?? 0));
         }
         using (var cmd = Cmd(cn, "SELECT COALESCE(SUM(char_count),0) FROM med_books;"))
@@ -595,9 +651,15 @@ SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf
             lock (db.SyncRoot)
             {
                 using var cn = db.Open();
+                long untagged = 0, taggedConcepts = 0;
+                using (var c1 = Cmd(cn, "SELECT COUNT(*) FROM med_concepts WHERE category<>'' AND COALESCE(deleted,0)=0;"))
+                    untagged = Convert.ToInt64(c1.ExecuteScalar() ?? 0);
+                using (var c2 = Cmd(cn, "SELECT COUNT(*) FROM med_tagged WHERE target_type='concept';"))
+                    taggedConcepts = Convert.ToInt64(c2.ExecuteScalar() ?? 0);
+                if (taggedConcepts >= untagged) return 0;
                 var rows = new List<(string Id, string Category)>();
                 var tagIds = new Dictionary<string, string>(StringComparer.Ordinal);
-                using (var cmd = Cmd(cn, "SELECT id,category FROM med_concepts WHERE category<>'';"))
+                using (var cmd = Cmd(cn, "SELECT id,category FROM med_concepts WHERE category<>'' AND COALESCE(deleted,0)=0;"))
                 using (var r = cmd.ExecuteReader())
                     while (r.Read()) rows.Add((r.GetString(0), r.GetString(1)));
                 using (var cmd = Cmd(cn, "SELECT id,name FROM med_tags;"))

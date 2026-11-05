@@ -25,7 +25,11 @@ export interface MedHit {
 export interface MedConcept {
   id: string; type: string; name: string; nameNorm: string; pinyin: string; initials: string
   category: string; keywords: string; dataJson: string; summary: string; source: string
-  hits: number; occurrences: MedHit[]; related: MedConcept[]; backlinks: MedNote[]
+  edited?: number; hits: number; occurrences: MedHit[]; related: MedConcept[]; backlinks: MedNote[]
+}
+export interface MedAnchor {
+  id: string; bookId: string; chapterId: string; chunkId: string; pStart: number
+  label: string; note: string; createdAt: number
 }
 export interface MedNote {
   id: string; title: string; body: string; targetType: string; targetId: string
@@ -52,7 +56,7 @@ export interface MedChapter {
 export interface MedChapterView {
   html: string; bookId: string; bookTitle: string; chapterId: string; chapterPath: string
   title: string; prev: string; next: string; imageCount: number
-  concepts: MedConcept[]; backlinks: MedNote[]; siblings: MedChapter[]
+  concepts: MedConcept[]; backlinks: MedNote[]; siblings: MedChapter[]; anchors: MedAnchor[]
 }
 export interface MedGraphNode { id: string; type: string; label: string; weight: number }
 export interface MedGraphEdge { source: string; target: string; kind: string; weight: number }
@@ -87,6 +91,12 @@ export const med = {
   untag: (tag: string, targetType: string, targetId: string) =>
     apiDelete(`/medapi/tagged?tag=${encodeURIComponent(tag)}&targetType=${encodeURIComponent(targetType)}&targetId=${encodeURIComponent(targetId)}`),
   concepts: (q: string, limit = 10) => apiGet<MedConcept[]>('/medapi/concepts', { q, limit }),
+  saveConcept: (c: Partial<MedConcept> & { bookId?: string; chapterId?: string; chunkId?: string; pStart?: number }) =>
+    apiPost<{ ok: boolean; id: string }>('/medapi/concepts', c),
+  deleteConcept: (id: string) => apiDelete(`/medapi/concepts/${encodeURIComponent(id)}`),
+  anchors: (chapterId: string) => apiGet<MedAnchor[]>('/medapi/anchors', { chapter: chapterId }),
+  saveAnchor: (a: Partial<MedAnchor>) => apiPost<{ ok: boolean; id: string }>('/medapi/anchors', a),
+  deleteAnchor: (id: string) => apiDelete(`/medapi/anchors/${encodeURIComponent(id)}`),
   templates: (kind = '', opts: { limit?: number; builtin?: number; q?: string } = {}) => {
     const p: Record<string, any> = {}
     if (kind) p.kind = kind

@@ -5,11 +5,12 @@ import { host } from '../host'
 import { toast } from '../ui'
 import GraphCanvas from '../med/GraphCanvas.vue'
 import MedCard from '../med/MedCard.vue'
+import LeafletView from '../med/LeafletView.vue'
 import {
   med, fmtBytes,
   type MedStatus, type MedBook, type MedSearchResult, type MedHit, type MedConcept,
   type MedChapterView, type MedNote, type MedTag, type MedTemplate, type MedQuery,
-  type MedGraph, type MedReport, type MedTaggedItem,
+  type MedGraph, type MedReport, type MedTaggedItem, type MedAnchor,
 } from '../med/api'
 
 const route = useRoute()
@@ -67,6 +68,15 @@ const mineSection = ref<'notes' | 'favorites' | 'templates' | 'queries'>('notes'
 const favoritesDetailed = ref<MedTaggedItem[]>([])
 const dataTab = ref<'sources' | 'import' | 'maintain'>('sources')
 const editingNoteId = ref('')
+const showConcept = ref(false)
+const conceptSaving = ref(false)
+const conceptDraft = ref({ id: '', name: '', type: 'other', category: '', keywords: '', summary: '', dataJson: '{}' })
+const conceptCtx = ref({ bookId: '', chapterId: '', chunkId: '', pStart: 0 })
+const showAnchor = ref(false)
+const anchorDraft = ref<Partial<MedAnchor>>({ label: '', note: '', pStart: 0, chapterId: '', bookId: '', chunkId: '' })
+const leafletConcept = ref<MedConcept | null>(null)
+const editingTemplateId = ref('')
+let skipRouteChapter = ''
 
 const TYPE_CHIPS = [
   { key: 'disease', label: '疾病' }, { key: 'symptom', label: '症状' }, { key: 'drug', label: '药品' },
@@ -86,7 +96,7 @@ const medVersion = computed(() => status.value?.version || '1.1.0')
 const categoryTags = computed(() => tags.value.filter(t => t.kind === 'category'))
 const favoriteCount = computed(() => favorites.value.length)
 const resultCards = computed(() => result.value?.concepts || [])
-const canBrowse = computed(() => !!q.value.trim() || activeTypes.value.length > 0 || !!activeTag.value || activeBooks.value.length > 0)
+const canBrowse = computed(() => true)
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
@@ -111,7 +121,6 @@ async function loadFavoritesDetailed() {
 
 async function doSearch(text = q.value, append = false) {
   q.value = text
-  if (!canBrowse.value) { result.value = null; return }
   if (!text.trim() && activeBooks.value.length && !activeTypes.value.length && !activeTag.value) {
     toast('按数据源筛选时请同时输入关键词', 'warning')
     return
@@ -138,6 +147,21 @@ function loadMoreHits() {
   if (!result.value || loadingMore.value) return
   if (result.value.hits.length >= result.value.hitTotal) return
   void doSearch(keyword.value, true)
+}
+
+async function loadMoreCards() {
+  if (!result.value || loadingMore.value) return
+  if (result.value.concepts.length >= result.value.conceptTotal) return
+  loadingMore.value = true
+  try {
+    const r = await med.search({
+      q: keyword.value, offset: result.value.concepts.length, limit: 60,
+      sort: sortMode.value, mode: 'phrase', types: activeTypes.value,
+      books: activeBooks.value, tags: activeTag.value ? [activeTag.value] : [],
+    })
+    result.value = { ...result.value, concepts: [...result.value.concepts, ...r.concepts], conceptTotal: r.conceptTotal, total: r.total }
+  } catch (e: any) { toast(e?.message || '加载失败') }
+  finally { loadingMore.value = false }
 }
 
 let suggestTimer: ReturnType<typeof setTimeout> | null = null
@@ -171,6 +195,8 @@ async function loadChapter(id: string, chunkId = '', terms = '', pStart = 0) {
       const el = chapterBox.value?.querySelector(`[data-p="${pStart}"]`) as HTMLElement | null
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       else chapterBox.value?.scrollTo({ top: 0 })
+    } else {
+      chapterBox.value?.scrollTo({ top: 0 })
     }
   } catch (e: any) { toast(e?.message || '章节加载失败') }
   finally { busy.value = '' }
@@ -218,6 +244,118 @@ async function showGraph(c: MedConcept) {
   graphCenterLabel.value = c.name
   tab.value = 'graph'
   graph.value = await med.graph(c.id, 1)
+}
+
+function openCard(c: MedConcept) {
+  if (c.type === 'leaflet') void openLeaflet(c)
+  else void openConcept(c.id)
+}
+
+async function openLeaflet(c: MedConcept) {
+  try { leafletConcept.value = await med.concept(c.id) }
+  catch { leafletConcept.value = c }
+}
+
+function prettyJson(text: string) {
+  try { return JSON.stringify(JSON.parse(text || '{}'), null, 2) } catch { return text || '{}' }
+}
+
+function editConcept(c: MedConcept | null, fromSelection = false) {
+  conceptDraft.value = c
+    ? { id: c.id, name: c.name, type: c.type, category: c.category || '', keywords: c.keywords || '', summary: c.summary || '', dataJson: prettyJson(c.dataJson) }
+    : { id: '', name: '', type: 'other', category: '', keywords: '', summary: '', dataJson: '{}' }
+  conceptCtx.value = {
+    bookId: chapter.value?.bookId || '', chapterId: chapter.value?.chapterId || '',
+    chunkId: '', pStart: 0,
+  }
+  if (fromSelection) {
+    const info = selectionInfo()
+    conceptDraft.value.name = info.text.slice(0, 80)
+    conceptDraft.value.summary = info.text.slice(0, 160)
+    conceptCtx.value.pStart = info.pStart
+  }
+  showConcept.value = true
+}
+
+function selectionInfo() {
+  const sel = window.getSelection()
+  const text = sel?.toString().trim() || ''
+  let pStart = 0
+  const node = sel?.anchorNode
+  const el = node?.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : node?.parentElement
+  const pEl = el?.closest?.('[data-p]') as HTMLElement | null
+  if (pEl) pStart = Number(pEl.getAttribute('data-p') || 0)
+  return { text, pStart }
+}
+
+async function saveConceptDraft() {
+  conceptSaving.value = true
+  try {
+    const saved = await med.saveConcept({
+      ...conceptDraft.value, ...conceptCtx.value,
+    })
+    showConcept.value = false
+    toast(conceptDraft.value.id ? '条目已更新' : '条目已添加')
+    await loadAll()
+    if (concept.value?.id === saved.id) concept.value = await med.concept(saved.id)
+    if (chapter.value && tab.value === 'read') await loadChapter(chapter.value.chapterId, '', keyword.value)
+    else if (result.value) await doSearch(keyword.value)
+  } catch (e: any) { toast(e?.message || '保存失败') }
+  finally { conceptSaving.value = false }
+}
+
+async function deleteConcept(c: MedConcept) {
+  if (!confirm(`删除条目“${c.name}”？搜索结果中会立即移除。`)) return
+  try {
+    await med.deleteConcept(c.id)
+    if (concept.value?.id === c.id) concept.value = null
+    toast('条目已删除')
+    if (result.value) await doSearch(keyword.value)
+    await loadAll()
+  } catch (e: any) { toast(e?.message || '删除失败') }
+}
+
+function newConceptFromSelection() { editConcept(null, true) }
+
+function newAnchorFromSelection() {
+  if (!chapter.value) { toast('请先打开章节'); return }
+  const info = selectionInfo()
+  anchorDraft.value = {
+    label: (info.text || chapter.value.title).slice(0, 60),
+    note: '', pStart: info.pStart, bookId: chapter.value.bookId,
+    chapterId: chapter.value.chapterId, chunkId: '',
+  }
+  showAnchor.value = true
+}
+
+async function saveAnchorDraft() {
+  if (!anchorDraft.value.label?.trim()) { toast('请输入锚点名称'); return }
+  try {
+    await med.saveAnchor(anchorDraft.value)
+    showAnchor.value = false
+    toast('锚点已添加')
+    if (chapter.value) await loadChapter(chapter.value.chapterId, '', keyword.value)
+  } catch (e: any) { toast(e?.message || '锚点保存失败') }
+}
+
+async function deleteAnchor(a: MedAnchor) {
+  if (!confirm(`删除锚点“${a.label}”？`)) return
+  await med.deleteAnchor(a.id)
+  if (chapter.value) await loadChapter(chapter.value.chapterId, '', keyword.value)
+}
+
+function scrollToP(p: number) {
+  const el = chapterBox.value?.querySelector(`[data-p="${p}"]`) as HTMLElement | null
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+async function goChapter(id: string) {
+  if (!id) return
+  skipRouteChapter = id
+  await loadChapter(id, '', keyword.value, 0)
+  const query: Record<string, string> = { view: 'read', chapter: id }
+  if (keyword.value) query.q = keyword.value
+  void router.replace({ name: 'med', query })
 }
 
 function openReader() {
@@ -333,15 +471,30 @@ function openBuiltin() {
   void loadBuiltin('')
 }
 
+function openNewTemplate() {
+  editingTemplateId.value = ''
+  templateDraft.value = { name: '', kind: 'note', contentJson: '{}' }
+  showTemplate.value = true
+}
+
+function editTemplate(t: MedTemplate) {
+  editingTemplateId.value = t.id
+  templateDraft.value = { name: t.name, kind: t.kind, contentJson: prettyJson(t.contentJson) }
+  showPreview.value = false
+  showTemplate.value = true
+}
+
 async function saveTemplateDraft() {
   if (!templateDraft.value.name.trim()) { toast('请输入模板名称'); return }
   await med.saveTemplate({
+    id: editingTemplateId.value || undefined,
     name: templateDraft.value.name.trim(), kind: templateDraft.value.kind,
     contentJson: templateDraft.value.contentJson, schemaJson: '{}', builtin: 0,
   })
   templates.value = await med.templates('', { builtin: 0, limit: 500 })
   showTemplate.value = false
-  toast('模板已保存')
+  toast(editingTemplateId.value ? '模板已更新' : '模板已保存')
+  editingTemplateId.value = ''
 }
 
 function templateBody(t: MedTemplate | null): string {
@@ -517,6 +670,7 @@ function onKey(e: KeyboardEvent) {
 watch(() => JSON.stringify(route.query), async () => {
   const v = route.query
   if (v.view === 'read' && typeof v.chapter === 'string') {
+    if (v.chapter === skipRouteChapter) { skipRouteChapter = ''; return }
     tab.value = 'read'
     q.value = typeof v.q === 'string' ? v.q : q.value
     keyword.value = q.value
@@ -531,6 +685,8 @@ onMounted(async () => {
     q.value = typeof v.q === 'string' ? v.q : ''
     keyword.value = q.value
     await loadChapter(v.chapter, typeof v.chunk === 'string' ? v.chunk : '', q.value, Number(v.p || 0))
+  } else if ((status.value?.concepts || 0) > 0) {
+    await doSearch('')
   }
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
@@ -654,8 +810,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <div class="med-concept-grid">
                 <MedCard v-for="c in resultCards" :key="c.id" :concept="c" compact
                          :favorited="isFav('concept', c.id)"
-                         @open="openConcept(c.id)" @search="doSearch"
+                         @open="openCard(c)" @search="doSearch"
                          @favorite="favorite('concept', c.id, c.name)" @graph="showGraph" @open-hit="openHit" />
+              </div>
+              <div v-if="result.concepts.length < result.conceptTotal" class="med-more">
+                <button :disabled="loadingMore" @click="loadMoreCards">{{ loadingMore ? '加载中…' : `加载更多（已显示 ${result.concepts.length}/${result.conceptTotal}）` }}</button>
               </div>
             </div>
 
@@ -690,9 +849,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <div class="med-read-head" v-if="chapter">
             <div class="med-crumb">{{ chapter.bookTitle }} › {{ chapter.chapterPath }}</div>
             <div class="med-read-actions">
-              <button :disabled="!chapter.prev" @click="router.push({ name: 'med', query: { view: 'read', chapter: chapter!.prev, q } })">← 上一节</button>
-              <button :disabled="!chapter.next" @click="router.push({ name: 'med', query: { view: 'read', chapter: chapter!.next, q } })">下一节 →</button>
+              <button :disabled="!chapter.prev" @click="goChapter(chapter!.prev)">← 上一节</button>
+              <button :disabled="!chapter.next" @click="goChapter(chapter!.next)">下一节 →</button>
               <button @mousedown.prevent @click="newNote">＋ 注释</button>
+              <button @mousedown.prevent @click="newConceptFromSelection">＋ 概念</button>
+              <button @mousedown.prevent @click="newAnchorFromSelection">＋ 锚点</button>
               <button :class="{ on: isFav('chapter', chapter.chapterId) }" @click="favorite('chapter', chapter.chapterId, chapter.title)">{{ isFav('chapter', chapter.chapterId) ? '★ 已收藏' : '☆ 收藏' }}</button>
               <button @click="openReader">在静读中打开</button>
             </div>
@@ -703,7 +864,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <div class="med-side-sec">
                 <div class="med-sec-head"><span>本章概念</span><em>{{ chapter?.concepts.length || 0 }}</em></div>
                 <div class="med-side-chips">
-                  <button v-for="c in chapter?.concepts || []" :key="c.id" @click="openConcept(c.id)">{{ c.name }}</button>
+                  <button v-for="c in chapter?.concepts || []" :key="c.id" @click="c.type === 'leaflet' ? openLeaflet(c) : openConcept(c.id)">{{ c.name }}</button>
                 </div>
               </div>
               <div class="med-side-sec">
@@ -712,6 +873,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                   {{ n.title }}<br /><em>{{ (n.body || '').slice(0, 60) }}</em>
                 </button>
                 <div v-if="!chapter?.backlinks?.length" class="med-hint">还没有引用本章的注释</div>
+              </div>
+              <div class="med-side-sec">
+                <div class="med-sec-head"><span>我的锚点</span><button @mousedown.prevent @click="newAnchorFromSelection">＋</button></div>
+                <div v-for="a in chapter?.anchors || []" :key="a.id" class="med-anchor-row">
+                  <button class="med-anchor-jump" @click="scrollToP(a.pStart)">{{ a.label }}</button>
+                  <button class="med-anchor-del" @click="deleteAnchor(a)">×</button>
+                </div>
+                <div v-if="!chapter?.anchors?.length" class="med-hint">选中文字后点“＋ 锚点”，可快速跳回该段</div>
               </div>
               <div class="med-side-sec" v-if="concept">
                 <div class="med-sec-head"><span>概念详情</span><button @click="concept = null">×</button></div>
@@ -722,7 +891,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <div class="med-sec-head"><span>本章目录</span></div>
                 <div class="med-siblings">
                   <button v-for="s in chapter?.siblings || []" :key="s.id" :class="{ on: s.id === chapter?.chapterId }"
-                          @click="router.push({ name: 'med', query: { view: 'read', chapter: s.id, q } })">{{ s.title }}</button>
+                          @click="goChapter(s.id)">{{ s.title }}</button>
                 </div>
               </div>
             </aside>
@@ -767,7 +936,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <template v-else-if="mineSection === 'templates'">
               <div class="med-mine-head">
                 <strong>我的模板</strong>
-                <button class="med-btn" @click="showTemplate = true">＋ 新建模板</button>
+                <button class="med-btn" @click="openNewTemplate">＋ 新建模板</button>
                 <button class="med-btn" @click="openBuiltin">内置模板库（{{ builtinCount }}）</button>
               </div>
               <div v-if="!myTemplates.length" class="med-hint">还没有自己的模板。可从内置模板库另存，或新建笔记/文书模板。</div>
@@ -796,6 +965,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                    @search="doSearch" @favorite="favorite('concept', concept.id, concept.name)"
                    @graph="showGraph" @open-hit="openHit" @open="openConcept(concept.id)" />
           <div v-else class="med-hint">点击检索结果中的概念卡查看结构、原文出处与相关条目。卡片本身可点击。</div>
+          <button v-if="concept?.type === 'leaflet'" class="med-btn primary" style="margin-top:8px;width:100%" @click="openLeaflet(concept)">打开说明书</button>
+          <div v-if="concept" class="med-detail-actions">
+            <button @click="editConcept(concept)">编辑</button>
+            <button class="danger" @click="deleteConcept(concept)">删除</button>
+            <button @click="editConcept(null)">＋ 新增</button>
+          </div>
+          <button v-else class="med-btn" @click="editConcept(null)">＋ 新增临床条目</button>
         </section>
         <section>
           <div class="med-sec-head"><span>最近注释</span><em>{{ notes.length }}</em></div>
@@ -926,6 +1102,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <ul>
             <li>直接搜疾病、症状、药品、检验、指南名称；也支持两字词，例如「心梗」。</li>
             <li>纯字母可试拼音首字母：<code>xlsj</code> → 心力衰竭，<code>amxljn</code> → 阿莫西林胶囊。</li>
+            <li>搜索框留空直接检索可浏览全部条目；再叠加类型/分类/收藏筛选。</li>
             <li>结果分「临床速查」和「原文段落」：前者是结构化卡片，后者可跳回书中原文。</li>
             <li>左侧「临床分类」可直接浏览；「类型筛选」可只看药品/检验等；输入关键词后再选数据源可只看某本书。</li>
           </ul>
@@ -933,7 +1110,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <ul>
             <li>点原文结果进入「精读」，会自动滚动并高亮命中段落。</li>
             <li>选中文字后点「＋ 注释」，可写 Markdown，支持 <code>[[急性心肌梗死]]</code> 双链。</li>
-            <li>注释、收藏与模板都在「我的」页签中编辑或删除；不会修改原书文件。</li>
+            <li>选中文字后还可「＋ 概念」加入自建条目（可新建分类/分组），或「＋ 锚点」保存当前段落跳转。</li>
+            <li>疾病/症状/药品/指南等条目在右侧详情可编辑、删除或新增；不会修改原书文件。</li>
+            <li>「药品说明书」类型有专用阅读界面，左侧目录可跳到适应症、用法用量、药理作用、禁忌等章节。</li>
+            <li>注释、收藏与模板都在「我的」页签中编辑或删除；模板可预览后直接编辑。</li>
           </ul>
           <h4>快捷键</h4>
           <p><code>Ctrl+K</code> 聚焦搜索 · <code>Ctrl+D</code> 收藏当前概念/章节 · <code>Esc</code> 关闭弹窗。</p>
@@ -944,6 +1124,48 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <li>想要更长结果：原文段落底部有「加载更多」；分类浏览按分类名称排序。</li>
           </ul>
           <p class="med-hint">详细文档：docs/医学助手使用说明.md · 数据保存在 data/medical.db。</p>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showConcept" class="med-modal-mask" @click.self="showConcept = false">
+      <div class="med-modal">
+        <div class="med-modal-head"><strong>{{ conceptDraft.id ? '编辑临床条目' : '新增临床条目' }}</strong><button @click="showConcept = false">×</button></div>
+        <div class="med-modal-body">
+          <div class="med-row">
+            <input v-model="conceptDraft.name" class="med-mini-input" placeholder="名称（疾病/症状/药品/指南…）" />
+            <select v-model="conceptDraft.type" class="med-mini-input" style="width:130px">
+              <option v-for="t in TYPE_CHIPS" :key="t.key" :value="t.key">{{ t.label }}</option>
+              <option value="document">文书</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+          <div class="med-row">
+            <input v-model="conceptDraft.category" class="med-mini-input" placeholder="分类 / 分组（可输入新名称，自动创建分类）" />
+            <input v-model="conceptDraft.keywords" class="med-mini-input" placeholder="关键词 / 别名，空格分隔" />
+          </div>
+          <input v-model="conceptDraft.summary" class="med-mini-input wide" style="margin-top:8px" placeholder="摘要（列表卡片显示）" />
+          <textarea v-model="conceptDraft.dataJson" class="med-textarea med-json-edit" placeholder='结构化字段 JSON，例如 {"适应症":"…","用法用量":"…"}'></textarea>
+          <p class="med-hint">字段使用 JSON；键名会作为说明书目录与卡片字段。当前{{ conceptCtx.chapterId ? '会关联到正在阅读的段落' : '未关联原文段落' }}。</p>
+          <div class="med-modal-actions">
+            <button @click="showConcept = false">取消</button>
+            <button class="med-primary" :disabled="conceptSaving" @click="saveConceptDraft">{{ conceptSaving ? '保存中…' : '保存' }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAnchor" class="med-modal-mask" @click.self="showAnchor = false">
+      <div class="med-modal small">
+        <div class="med-modal-head"><strong>添加锚点</strong><button @click="showAnchor = false">×</button></div>
+        <div class="med-modal-body">
+          <input v-model="anchorDraft.label" class="med-mini-input wide" placeholder="锚点名称" />
+          <input v-model="anchorDraft.note" class="med-mini-input wide" placeholder="备注（可选）" />
+          <p class="med-hint">将记录当前选中段落（第 {{ anchorDraft.pStart || 0 }} 段），之后可在本章右侧一键跳回。</p>
+          <div class="med-modal-actions">
+            <button @click="showAnchor = false">取消</button>
+            <button class="med-primary" @click="saveAnchorDraft">保存锚点</button>
+          </div>
         </div>
       </div>
     </div>
@@ -965,7 +1187,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
     <div v-if="showTemplate" class="med-modal-mask" @click.self="showTemplate = false">
       <div class="med-modal small">
-        <div class="med-modal-head"><strong>新建模板</strong><button @click="showTemplate = false">×</button></div>
+        <div class="med-modal-head"><strong>{{ editingTemplateId ? '编辑模板' : '新建模板' }}</strong><button @click="showTemplate = false">×</button></div>
         <div class="med-modal-body">
           <input v-model="templateDraft.name" class="med-mini-input wide" placeholder="模板名称" />
           <select v-model="templateDraft.kind" class="med-mini-input wide"><option value="note">笔记模板</option><option value="card">卡片模板</option><option value="doc">文书模板</option></select>
@@ -983,6 +1205,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
         <div class="med-modal-actions">
           <button v-if="previewTemplate" class="med-primary" @click="saveAsMine(previewTemplate)">另存为我的模板</button>
+          <button v-if="previewTemplate && previewTemplate.builtin === 0" @click="editTemplate(previewTemplate)">编辑</button>
           <button v-if="previewTemplate && previewTemplate.builtin === 0" class="danger" @click="deleteTemplate(previewTemplate)">删除</button>
           <button @click="showPreview = false">关闭</button>
         </div>
@@ -1006,6 +1229,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
     </div>
+
+    <LeafletView v-if="leafletConcept" :concept="leafletConcept" @close="leafletConcept = null" />
   </div>
 </template>
 
@@ -1196,4 +1421,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .med-graph-center { font-size: 11px; color: var(--text-3); }
 .med-graph-bar button.on { border-color: var(--accent); color: var(--accent); }
 .med-modal-mask { position: fixed; }
+.med-json-edit { height: 260px; font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; line-height: 1.6; }
+.med-detail-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.med-detail-actions button { border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); border-radius: 7px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
+.med-detail-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.med-detail-actions button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.med-anchor-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.med-anchor-jump { flex: 1; min-width: 0; border: none; background: none; color: var(--text-2); text-align: left; font-size: 11.5px; padding: 5px 6px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.med-anchor-jump:hover { background: var(--panel-2); color: var(--accent); }
+.med-anchor-del { border: none; background: none; color: var(--text-3); cursor: pointer; }
 </style>

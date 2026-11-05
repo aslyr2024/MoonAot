@@ -12,7 +12,7 @@ MoonAot（静读天下 AOT 版）是一个完全本地运行的 Windows 桌面�
 - **全盘搜索**：NTFS MFT 秒级索引 + USN 实时更新 + Everything 风格查询语言，非 NTFS 盘 FileSystemWatcher 回退。
 - **离线百科**：ZIM 解析（zstd/xz + OpenCC 简繁转换），全盘搜索中的 `.zim` 默认用内置维基打开。
 - **文档/模型**：DOCX、XLSX/XLS/CSV、PPTX、FBX/OBJ/GLB/GLTF/STL/3DS/DAE/PLY/3MF、DXF；代码/文本用 CodeMirror 打开并保存。
-- **医学助手**：本地临床速查 + 医学书原文定位；疾病/症状/药品/检验/指南检索、分类浏览、段落级跳转、注释/收藏/模板、关系图谱，全程离线。
+- **医学助手**：本地临床速查 + 医学书原文定位；疾病/症状/药品/检验/指南检索、分类浏览、段落级跳转、自定义概念/锚点/注释/收藏/模板、关系图谱，另有 3.28 万条药品说明书可目录化浏览，全程离线。
 - **其他**：内置多标签浏览器、网站抓取/托管、工具箱（进程/端口/截图/压缩）、按键精灵宏引擎。
 
 ## 技术栈
@@ -70,6 +70,7 @@ dotnet publish MoonAot/MoonAot.csproj -c Release -r win-x64 -p:Platform=x64 -o p
 - [开发问题与解决记录](docs/DEVELOPMENT_NOTES.md)
 - [用户手册](docs/USER_MANUAL.md)
 - [医学助手使用说明](docs/医学助手使用说明.md)
+- [药品说明书数据说明](docs/药品说明书数据说明.md)
 - [构建与发布](docs/BUILD.md)
 - [第三方组件与许可](docs/THIRD_PARTY_NOTICES.md)
 - [更新记录](CHANGELOG.md)

@@ -53,6 +53,8 @@ public sealed class MedDatabase
             cn.Open();
             Exec(cn, "PRAGMA journal_mode=WAL;");
             CreateSchema(cn);
+            EnsureColumn(cn, "med_concepts", "edited", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn(cn, "med_concepts", "deleted", "INTEGER NOT NULL DEFAULT 0");
             Initialized = true;
         }
     }
@@ -64,6 +66,19 @@ public sealed class MedDatabase
         cn.Open();
         Exec(cn, "PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-32000; PRAGMA mmap_size=268435456;");
         return cn;
+    }
+
+    private static void EnsureColumn(SqliteConnection cn, string table, string column, string ddl)
+    {
+        try
+        {
+            using var check = Cmd(cn, "SELECT COUNT(*) FROM pragma_table_info($t) WHERE name=$c;");
+            P(check, "$t", table); P(check, "$c", column);
+            if (Convert.ToInt64(check.ExecuteScalar() ?? 0) > 0) return;
+            using var alter = Cmd(cn, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + ddl + ";");
+            alter.ExecuteNonQuery();
+        }
+        catch { }
     }
 
     private static void Exec(SqliteConnection cn, string sql)
@@ -135,6 +150,9 @@ CREATE TABLE IF NOT EXISTS med_concepts (
 CREATE INDEX IF NOT EXISTS ix_med_concepts_norm ON med_concepts(name_norm);
 CREATE INDEX IF NOT EXISTS ix_med_concepts_init ON med_concepts(initials);
 CREATE INDEX IF NOT EXISTS ix_med_concepts_type ON med_concepts(type);
+CREATE INDEX IF NOT EXISTS ix_med_concepts_hot ON med_concepts(deleted,id,type,name,name_norm,pinyin,initials,category,summary,source,edited);
+CREATE INDEX IF NOT EXISTS ix_med_concepts_cat ON med_concepts(deleted,category);
+CREATE INDEX IF NOT EXISTS ix_med_concepts_browse ON med_concepts(deleted,category,name,id,type,name_norm,pinyin,initials,summary,source,edited);
 CREATE TABLE IF NOT EXISTS med_synonyms (
     term TEXT PRIMARY KEY, canonical_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'alias'
 );
@@ -143,6 +161,7 @@ CREATE TABLE IF NOT EXISTS med_hits (
     chunk_id TEXT NOT NULL, tf INTEGER NOT NULL DEFAULT 1, positions TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (concept_id, chunk_id)
 );
+CREATE INDEX IF NOT EXISTS ix_med_hits_chunk ON med_hits(chunk_id);
 CREATE INDEX IF NOT EXISTS ix_med_hits_concept ON med_hits(concept_id, book_id);
 CREATE INDEX IF NOT EXISTS ix_med_hits_chunk ON med_hits(chunk_id);
 CREATE TABLE IF NOT EXISTS med_links (
@@ -180,6 +199,13 @@ CREATE TABLE IF NOT EXISTS med_queries (
     pinned INTEGER NOT NULL DEFAULT 0, last_used_at INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS med_anchors (
+    id TEXT PRIMARY KEY, book_id TEXT NOT NULL DEFAULT '', chapter_id TEXT NOT NULL DEFAULT '',
+    chunk_id TEXT NOT NULL DEFAULT '', p_start INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_med_anchors_chapter ON med_anchors(chapter_id);
+CREATE INDEX IF NOT EXISTS ix_med_anchors_book ON med_anchors(book_id);
 CREATE TABLE IF NOT EXISTS med_meta (key TEXT PRIMARY KEY, value TEXT);
 PRAGMA user_version=1;
 """;

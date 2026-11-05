@@ -103,7 +103,55 @@ public sealed partial class MoonServer
                         SendJsonString(ctx, 200, MedJson.S(dto)); return;
                     }
                 case "concepts":
-                    SendJsonString(ctx, 200, MedJson.S(MedConcepts.SearchLite(QueryValue(query, "q"), Math.Clamp(QueryInt(query, "limit", 30), 1, 100)))); return;
+                    {
+                        if (req.HttpMethod == "POST")
+                        {
+                            using var body = ReadJson(req);
+                            if (body == null) { SendText(ctx, 400, "body required"); return; }
+                            var r = body.RootElement;
+                            var saved = MedConcepts.SaveConcept(new MedConceptDto
+                            {
+                                Id = GetString(r, "id") ?? "",
+                                Type = GetString(r, "type") ?? "other",
+                                Name = GetString(r, "name") ?? "",
+                                Pinyin = GetString(r, "pinyin") ?? "",
+                                Category = GetString(r, "category") ?? "",
+                                Keywords = GetString(r, "keywords") ?? "",
+                                Summary = GetString(r, "summary") ?? "",
+                                DataJson = GetString(r, "dataJson") ?? "{}",
+                            }, GetString(r, "bookId") ?? "", GetString(r, "chapterId") ?? "",
+                               GetString(r, "chunkId") ?? "", (int)GetLong(r, "pStart", 0));
+                            SendJsonString(ctx, 200, MedJson.S(new MedOk { Ok = true, Id = saved })); return;
+                        }
+                        if (req.HttpMethod == "DELETE" && id.Length > 0)
+                        {
+                            MedConcepts.DeleteConcept(id);
+                            Ok(ctx); return;
+                        }
+                        SendJsonString(ctx, 200, MedJson.S(MedConcepts.SearchLite(QueryValue(query, "q"), Math.Clamp(QueryInt(query, "limit", 30), 1, 100)))); return;
+                    }
+                case "anchors":
+                    {
+                        if (req.HttpMethod == "POST")
+                        {
+                            using var body = ReadJson(req);
+                            if (body == null) { SendText(ctx, 400, "body required"); return; }
+                            var r = body.RootElement;
+                            var aid = MedStore.SaveAnchor(new MedAnchorDto
+                            {
+                                Id = GetString(r, "id") ?? "",
+                                BookId = GetString(r, "bookId") ?? "",
+                                ChapterId = GetString(r, "chapterId") ?? "",
+                                ChunkId = GetString(r, "chunkId") ?? "",
+                                PStart = (int)GetLong(r, "pStart", 0),
+                                Label = GetString(r, "label") ?? "锚点",
+                                Note = GetString(r, "note") ?? "",
+                            });
+                            SendJsonString(ctx, 200, MedJson.S(new MedOk { Ok = true, Id = aid })); return;
+                        }
+                        if (req.HttpMethod == "DELETE" && id.Length > 0) { MedStore.DeleteAnchor(id); Ok(ctx); return; }
+                        SendJsonString(ctx, 200, MedJson.S(MedStore.Anchors(QueryValue(query, "chapter"), QueryValue(query, "book")))); return;
+                    }
                 case "graph":
                     SendJsonString(ctx, 200, MedJson.S(MedGraph.Build(
                         QueryValue(query, "center"), Math.Clamp(QueryInt(query, "depth", 1), 1, 2),

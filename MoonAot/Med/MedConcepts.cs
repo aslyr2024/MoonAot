@@ -28,6 +28,7 @@ public static class MedConcepts
         public string Summary = "";
         public string DataJson = "{}";
         public string Source = "";
+        public int Edited;
     }
 
     private static readonly Dictionary<string, string> BuiltinSynonyms = new(StringComparer.OrdinalIgnoreCase)
@@ -47,14 +48,15 @@ public static class MedConcepts
             if (_cacheAt > 0 && Environment.TickCount64 - _cacheAt < 120000) return _cache;
             var list = new List<ConceptLite>();
             using var cn = MedDatabase.Instance.Open();
-            using var cmd = Cmd(cn, "SELECT id,type,name,name_norm,pinyin,initials,category,summary,data_json,source FROM med_concepts;");
+            // data_json 可能很大（药品说明书约 100MB），热层只缓存检索字段，详情按需读取
+            using var cmd = Cmd(cn, "SELECT id,type,name,name_norm,pinyin,initials,category,summary,source,edited FROM med_concepts WHERE COALESCE(deleted,0)=0;");
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new ConceptLite
                 {
                     Id = r.GetString(0), Type = r.GetString(1), Name = r.GetString(2), NameNorm = r.GetString(3),
                     Pinyin = r.GetString(4), Initials = r.GetString(5), Category = r.GetString(6),
-                    Summary = r.GetString(7), DataJson = r.GetString(8), Source = r.GetString(9),
+                    Summary = r.GetString(7), DataJson = "{}", Source = r.GetString(8), Edited = r.GetInt32(9),
                 });
             _cache = list;
             _cacheAt = Environment.TickCount64;
@@ -96,7 +98,11 @@ public static class MedConcepts
         {
             using var cn = db.Open();
             using var tx = cn.BeginTransaction();
-            using (var del = Cmd(cn, "DELETE FROM med_concepts WHERE source='clinical';")) { del.Transaction = tx; del.ExecuteNonQuery(); }
+            var protectedIds = new HashSet<string>(StringComparer.Ordinal);
+            using (var cmd = Cmd(cn, "SELECT id FROM med_concepts WHERE COALESCE(edited,0)=1 OR COALESCE(deleted,0)=1;"))
+            using (var r = cmd.ExecuteReader())
+                while (r.Read()) protectedIds.Add(r.GetString(0));
+            using (var del = Cmd(cn, "DELETE FROM med_concepts WHERE source='clinical' AND COALESCE(edited,0)=0 AND COALESCE(deleted,0)=0;")) { del.Transaction = tx; del.ExecuteNonQuery(); }
             using var ins = Cmd(cn, """
 INSERT OR REPLACE INTO med_concepts
  (id,type,name,name_norm,pinyin,initials,category,keywords,data_json,summary,source,source_version)
@@ -128,6 +134,7 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
                         var id = Str(it, "id");
                         var name = Str(it, "name");
                         if (id.Length == 0 || name.Length == 0) continue;
+                        if (protectedIds.Contains("cli-" + id)) continue;
                         var type = Str(it, "type");
                         var data = it.TryGetProperty("data", out var d) ? d.GetRawText() : "{}";
                         var kw = Str(it, "keywords");
@@ -419,6 +426,105 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
         return top.Count;
     }
 
+    /// <summary>新增或编辑临床条目；编辑 clinical 条目会标记 edited，重新导入 clinical 时保留用户修改。</summary>
+    public static string SaveConcept(MedConceptDto c, string bookId = "", string chapterId = "", string chunkId = "", int pStart = 0)
+    {
+        var db = MedDatabase.Instance;
+        lock (db.SyncRoot)
+        {
+            using var cn = db.Open();
+            using var tx = cn.BeginTransaction();
+            if (string.IsNullOrEmpty(c.Id)) c.Id = "user-" + MedEpub.NewId("");
+            var name = (c.Name ?? "").Trim();
+            if (name.Length == 0) throw new InvalidOperationException("名称不能为空");
+            var norm = MedText.NormalizeTitle(name);
+            var pinyin = (c.Pinyin ?? "").Trim();
+            var initials = DeriveInitials(pinyin);
+            var data = string.IsNullOrWhiteSpace(c.DataJson) ? "{}" : c.DataJson;
+            try { using var _ = JsonDocument.Parse(data); } catch { data = "{}"; }
+            var summary = (c.Summary ?? "").Trim();
+            if (summary.Length == 0) summary = FirstText(data, c.Keywords ?? "");
+            if (summary.Length > 160) summary = summary[..160];
+            var type = string.IsNullOrWhiteSpace(c.Type) ? "other" : c.Type.Trim();
+            var category = (c.Category ?? "").Trim();
+            using (var exists = Cmd(cn, "SELECT COUNT(*) FROM med_concepts WHERE id=$id;")) { P(exists, "$id", c.Id); }
+            var found = false;
+            using (var q = Cmd(cn, "SELECT COUNT(*) FROM med_concepts WHERE id=$id;")) { P(q, "$id", c.Id); found = Convert.ToInt64(q.ExecuteScalar() ?? 0) > 0; }
+            using (var cmd = found
+                ? Cmd(cn, "UPDATE med_concepts SET type=$t,name=$n,name_norm=$nn,pinyin=$p,initials=$i,category=$c,keywords=$k,data_json=$d,summary=$s,edited=1,deleted=0 WHERE id=$id;")
+                : Cmd(cn, "INSERT INTO med_concepts(id,type,name,name_norm,pinyin,initials,category,keywords,data_json,summary,source,source_version,edited,deleted) VALUES($id,$t,$n,$nn,$p,$i,$c,$k,$d,$s,'user','user',1,0);"))
+            {
+                cmd.Transaction = tx;
+                P(cmd, "$id", c.Id); P(cmd, "$t", type); P(cmd, "$n", name); P(cmd, "$nn", norm);
+                P(cmd, "$p", pinyin); P(cmd, "$i", initials); P(cmd, "$c", category);
+                P(cmd, "$k", c.Keywords ?? ""); P(cmd, "$d", data); P(cmd, "$s", summary);
+                cmd.ExecuteNonQuery();
+            }
+            if (category.Length > 0)
+            {
+                var tagId = "tag-" + MedText.NormalizeTitle(category);
+                using (var tag = Cmd(cn, "INSERT OR IGNORE INTO med_tags(id,name,parent_id,color,ord,kind) VALUES($id,$n,'','#5B8FF9',900,'category');"))
+                { tag.Transaction = tx; P(tag, "$id", tagId); P(tag, "$n", category); tag.ExecuteNonQuery(); }
+                using (var clr = Cmd(cn, "DELETE FROM med_tagged WHERE target_type='concept' AND target_id=$id AND tag_id IN (SELECT id FROM med_tags WHERE kind='category');"))
+                { clr.Transaction = tx; P(clr, "$id", c.Id); clr.ExecuteNonQuery(); }
+                using (var link = Cmd(cn, "INSERT OR IGNORE INTO med_tagged(tag_id,target_type,target_id,added_at,note) VALUES($t,'concept',$id,$now,'');"))
+                { link.Transaction = tx; P(link, "$t", tagId); P(link, "$id", c.Id); P(link, "$now", Now); link.ExecuteNonQuery(); }
+            }
+            if (chunkId.Length == 0 && chapterId.Length > 0)
+            {
+                using (var find = Cmd(cn, "SELECT id FROM med_chunks WHERE chapter_id=$ch AND p_start<=$p AND p_end>=$p ORDER BY ord LIMIT 1;"))
+                {
+                    find.Transaction = tx;
+                    P(find, "$ch", chapterId); P(find, "$p", pStart);
+                    chunkId = find.ExecuteScalar() as string ?? "";
+                }
+                if (chunkId.Length == 0)
+                {
+                    using var near = Cmd(cn, "SELECT id FROM med_chunks WHERE chapter_id=$ch ORDER BY ABS(p_start-$p) LIMIT 1;");
+                    near.Transaction = tx;
+                    P(near, "$ch", chapterId); P(near, "$p", pStart);
+                    chunkId = near.ExecuteScalar() as string ?? "";
+                }
+            }
+            if (chunkId.Length > 0)
+            {
+                using var hit = Cmd(cn, "INSERT OR REPLACE INTO med_hits(concept_id,book_id,chapter_id,chunk_id,tf,positions) VALUES($c,$b,$ch,$k,1,'');");
+                hit.Transaction = tx;
+                P(hit, "$c", c.Id); P(hit, "$b", bookId); P(hit, "$ch", chapterId); P(hit, "$k", chunkId);
+                hit.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        Invalidate();
+        return c.Id;
+    }
+
+    /// <summary>软删除：保留行并标记 deleted，重新导入 clinical 时不会复活；搜索结果与分类计数立即消失。</summary>
+    public static void DeleteConcept(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        var db = MedDatabase.Instance;
+        lock (db.SyncRoot)
+        {
+            using var cn = db.Open();
+            using var tx = cn.BeginTransaction();
+            using (var cmd = Cmd(cn, "UPDATE med_concepts SET deleted=1, edited=1 WHERE id=$id;")) { cmd.Transaction = tx; P(cmd, "$id", id); cmd.ExecuteNonQuery(); }
+            using (var cmd = Cmd(cn, "DELETE FROM med_hits WHERE concept_id=$id;")) { cmd.Transaction = tx; P(cmd, "$id", id); cmd.ExecuteNonQuery(); }
+            using (var cmd = Cmd(cn, "DELETE FROM med_tagged WHERE target_type='concept' AND target_id=$id;")) { cmd.Transaction = tx; P(cmd, "$id", id); cmd.ExecuteNonQuery(); }
+            tx.Commit();
+        }
+        Invalidate();
+    }
+
+    private static long Now => DateTimeOffset.Now.ToUnixTimeMilliseconds();
+
+    private static string DeriveInitials(string pinyin)
+    {
+        if (string.IsNullOrEmpty(pinyin)) return "";
+        var caps = new string(pinyin.Where(char.IsUpper).ToArray());
+        return caps.Length >= 2 ? caps.ToLowerInvariant() : pinyin.ToLowerInvariant();
+    }
+
     public static List<MedConceptDto> SearchLite(string q, int limit = 12)
     {
         var norm = MedText.NormalizeTitle(q);
@@ -445,6 +551,7 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
     {
         Id = c.Id, Type = c.Type, Name = c.Name, NameNorm = c.NameNorm, Pinyin = c.Pinyin,
         Initials = c.Initials, Category = c.Category, Summary = c.Summary, DataJson = c.DataJson, Source = c.Source,
+        Edited = c.Edited,
     };
 
     public static MedConceptDto? Get(string id, bool withOccurrences = true)
@@ -453,6 +560,8 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
         if (c == null) return null;
         var dto = ToDto(c);
         using var cn = MedDatabase.Instance.Open();
+        using (var cmd = Cmd(cn, "SELECT data_json FROM med_concepts WHERE id=$id;"))
+        { P(cmd, "$id", id); dto.DataJson = cmd.ExecuteScalar() as string ?? "{}"; }
         using (var cmd = Cmd(cn, "SELECT COUNT(*) FROM med_hits WHERE concept_id=$c;"))
         { P(cmd, "$c", id); dto.Hits = Convert.ToInt32(cmd.ExecuteScalar() ?? 0); }
         if (withOccurrences)
