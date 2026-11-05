@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BarChart3, BookMarked, BookOpen, ChevronLeft, ChevronRight, Clock3, CloudDownload, FolderOpen, Gamepad2, Globe2,
-  LibraryBig, MoonStar, NotebookPen, Plus, Search as SearchIcon, Settings, Sparkles, Wrench,
+  LibraryBig, MoonStar, NotebookPen, Plus, Search as SearchIcon, Settings, Sparkles, Wrench, HeartPulse,
 } from 'lucide-vue-next'
 import { state } from '../store'
 import { PALETTES, themeNames } from '../theme'
@@ -23,6 +23,7 @@ const items = computed(() => [
   { name: 'macro', label: '按键精灵', icon: Gamepad2, badge: 0 },
   { name: 'search', label: '全盘搜索', icon: SearchIcon, badge: 0 },
   { name: 'wiki', label: '维基百科', icon: BookMarked, badge: 0 },
+  { name: 'med', label: '医学助手', icon: HeartPulse, badge: 0 },
   { name: 'browser', label: '浏览器', icon: Globe2, badge: 0 },
   { name: 'toolbox', label: '工具箱', icon: Wrench, badge: 0 },
   { name: 'sitetools', label: '网站工具', icon: CloudDownload, badge: 0 },

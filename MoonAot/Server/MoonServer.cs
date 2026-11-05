@@ -174,6 +174,11 @@ public sealed partial class MoonServer
                 HandleTinyApi(ctx, path["/tiny/api/".Length..], query);
                 return;
             }
+            if (path.StartsWith("/medapi/", StringComparison.Ordinal))
+            {
+                HandleMedApi(ctx, path["/medapi/".Length..], query);
+                return;
+            }
             if (path.StartsWith("/zimapi/", StringComparison.Ordinal))
             {
                 HandleZimApi(ctx, path["/zimapi/".Length..], query);
@@ -986,7 +991,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.0.12",
+            Version = "1.1.0",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,

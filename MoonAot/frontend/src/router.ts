@@ -9,6 +9,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/macro', name: 'macro', component: () => import('./views/MacroView.vue'), meta: { title: '按键精灵' } },
   { path: '/browser', name: 'browser', component: () => import('./views/BrowserLauncher.vue'), meta: { title: '浏览器' } },
   { path: '/wiki', name: 'wiki', component: () => import('./views/WikiView.vue'), meta: { title: '维基百科' } },
+  { path: '/med', name: 'med', component: () => import('./views/MedView.vue'), meta: { title: '医学助手' } },
   { path: '/search', name: 'search', component: () => import('./views/SearchView.vue'), meta: { title: '全盘搜索' } },
   { path: '/toolbox', name: 'toolbox', component: () => import('./views/ToolboxView.vue'), meta: { title: '工具箱' } },
   { path: '/sitetools', name: 'sitetools', component: () => import('./views/SiteToolsView.vue'), meta: { title: '网站工具' } },
