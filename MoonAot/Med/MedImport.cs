@@ -57,6 +57,80 @@ public static class MedImport
         return report;
     }
 
+    /// <summary>目录批量导入同格式 OCR JSON：一个总 job，逐本完成图片本地化 + 建索引。</summary>
+    public static MedImportReportDto StartJsonBookBatch(string path, string volume = "")
+    {
+        var paths = new List<string>();
+        if (Directory.Exists(path))
+        {
+            paths = Directory.GetFiles(path, "*PaddleOCR*.json", SearchOption.AllDirectories)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            if (paths.Count == 0)
+                paths = Directory.GetFiles(path, "*.json", SearchOption.AllDirectories)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        else if (File.Exists(path) && path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            paths.Add(path);
+
+        var report = new MedImportReportDto { Kind = "jsonbook-batch" };
+        if (paths.Count == 0) { report.Ok = false; report.Error = "目录中没有找到 JSON 图书: " + path; return report; }
+        var job = new MedJobDto
+        {
+            Id = MedEpub.NewId("j"), Kind = "jsonbook-batch", Running = true, Total = paths.Count,
+            StartedAt = DateTimeOffset.Now.ToUnixTimeMilliseconds(), Message = "准备导入 " + paths.Count + " 本",
+        };
+        Jobs[job.Id] = job;
+        report.Ok = true;
+        report.JobId = job.Id;
+        report.Messages.Add("待导入 " + paths.Count + " 本：" + string.Join(" / ", paths.Take(3).Select(Path.GetFileName)) + (paths.Count > 3 ? " …" : ""));
+
+        _ = Task.Run(() =>
+        {
+            var sw = Stopwatch.StartNew();
+            var agg = new MedImportReportDto { Ok = true, Kind = "jsonbook-batch", JobId = job.Id };
+            int i = 0;
+            foreach (var p in paths)
+            {
+                i++;
+                job.Message = $"({i}/{paths.Count}) {Path.GetFileName(p)}";
+                try
+                {
+                    var r = RunBook(p, volume.Length > 0 ? volume : GuessVolumeFromName(Path.GetFileName(p)), "jsonbook", job);
+                    agg.Books += r.Books; agg.Chapters += r.Chapters; agg.Chunks += r.Chunks;
+                    agg.Chars += r.Chars; agg.Images += r.Images; agg.Hits += r.Hits;
+                    agg.Links = r.Links; agg.AnchorTotal += r.AnchorTotal; agg.AnchorResolved += r.AnchorResolved;
+                    agg.Messages.Add($"{Path.GetFileName(p)}：{r.Chapters} 章 / {r.Chunks} 段 / 图片 {r.Images} 张 / {r.ElapsedMs}ms");
+                    agg.Messages.AddRange(r.Messages.Where(m => m.Contains("失败")));
+                    if (!r.Ok) { agg.Ok = false; agg.Messages.Add("失败：" + r.Error); }
+                }
+                catch (Exception ex)
+                {
+                    agg.Ok = false;
+                    agg.Messages.Add(Path.GetFileName(p) + " 导入异常：" + ex.Message);
+                    Log.Error("[med] JSON 图书导入失败 " + p, ex);
+                }
+                job.Done = i;
+                job.Total = paths.Count;
+            }
+            agg.ElapsedMs = sw.ElapsedMilliseconds;
+            agg.DbBytes = MedDatabase.Instance.DbBytes;
+            agg.Messages.Add($"批量完成：{agg.Books} 本 / {agg.Chapters} 章 / {agg.Chunks} 段 / 图片 {agg.Images} 张 / {agg.ElapsedMs}ms");
+            job.Report = agg;
+            job.Message = "完成";
+            job.Running = false;
+            job.FinishedAt = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        });
+        return report;
+    }
+
+    private static string GuessVolumeFromName(string name)
+    {
+        if (name.Contains("（上）") || name.Contains("上卷") || name.Contains("上册")) return "上卷";
+        if (name.Contains("（中）") || name.Contains("中卷") || name.Contains("中册")) return "中卷";
+        if (name.Contains("（下）") || name.Contains("下卷") || name.Contains("下册")) return "下卷";
+        return "";
+    }
+
     public static MedJobDto? Job(string id) => Jobs.TryGetValue(id, out var j) ? j : null;
 
     public static MedJobDto? Wait(string id, int timeoutMs = 300000)
@@ -108,6 +182,12 @@ public static class MedImport
 
         MedBookDraft draft;
         if (type == "markdown") draft = ParseMarkdown(path, volume);
+        else if (type == "jsonbook") draft = MedJsonBook.Parse(path, bookId, (d, t, m) =>
+        {
+            job.Done = Math.Min(70, (int)(d * 70.0 / Math.Max(1, t)));
+            job.Total = 100;
+            job.Message = m;
+        });
         else draft = MedEpub.Parse(path, volume, (d, t, m) =>
         {
             job.Done = (int)(d * 70.0 / Math.Max(1, t));
@@ -178,6 +258,7 @@ UPDATE med_books SET title=$t,status='ready',indexed_at=$now,doc_count=$dc,chapt
         report.Chapters = draft.Chapters.Count;
         report.Chunks = draft.Chunks.Count;
         report.Chars = draft.CharCount;
+        report.Images = draft.ImageCount;
         report.AnchorTotal = draft.AnchorTotal;
         report.AnchorResolved = draft.AnchorResolved;
         report.Books = 1;

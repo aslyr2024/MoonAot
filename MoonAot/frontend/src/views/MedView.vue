@@ -6,6 +6,8 @@ import { toast } from '../ui'
 import GraphCanvas from '../med/GraphCanvas.vue'
 import MedCard from '../med/MedCard.vue'
 import LeafletView from '../med/LeafletView.vue'
+import MedPager from '../med/MedPager.vue'
+import { ensureTerms, linkifyDom, termIdFromEvent, termWordFromEvent, termCount } from '../med/terms'
 import {
   med, fmtBytes,
   type MedStatus, type MedBook, type MedSearchResult, type MedHit, type MedConcept,
@@ -45,6 +47,7 @@ const showTemplate = ref(false)
 const importPath = ref('')
 const importVolume = ref('')
 const importKind = ref<'epub' | 'markdown'>('epub')
+const jsonBookPath = ref('')
 const clinicalPath = ref('')
 const leaflet = ref<Record<string, string>>({ name: '', brand: '', spec: '', indication: '', dosage: '', contraindication: '', adverse: '', interaction: '', storage: '' })
 const noteDraft = ref<Partial<MedNote>>({ title: '', body: '', quote: '', targetType: 'chapter', targetId: '' })
@@ -54,7 +57,6 @@ const favorites = ref<string[]>([])
 const resultTab = ref<'cards' | 'hits' | 'notes'>('cards')
 const sortMode = ref<'relevance' | 'book_order'>('relevance')
 const keyword = ref('')
-const loadingMore = ref(false)
 const conceptLoading = ref(false)
 const showHelp = ref(false)
 const showData = ref(false)
@@ -98,6 +100,83 @@ const favoriteCount = computed(() => favorites.value.length)
 const resultCards = computed(() => result.value?.concepts || [])
 const canBrowse = computed(() => true)
 
+// 结果统一走分页：卡片默认 4 条（2 列 × 2 行），原文段落默认 10 条
+const cardsPage = ref(1)
+const hitsPage = ref(1)
+const cardsPageSize = ref(4)
+const hitsPageSize = ref(10)
+const minePage = ref(1)
+const minePageSize = ref(4)
+const builtinPage = ref(1)
+const builtinPageSize = ref(4)
+const showConceptWide = ref(false)
+const termLinkCount = ref(0)
+
+// 栏宽可拖动：列表页中间是卡片列（窄）、右栏是详情（宽）；精读/图谱页反过来
+const leftWidth = ref(180)
+const midWidth = ref(520)
+const rightWidth = ref(320)
+const resizing = ref<'left' | 'right' | null>(null)
+let resizeStartX = 0
+let resizeStartVal = 0
+const bodyStyle = computed(() => ({
+  '--med-left': leftWidth.value + 'px',
+  '--med-mid': midWidth.value + 'px',
+  '--med-right': rightWidth.value + 'px',
+}))
+function loadWidths() {
+  try {
+    const l = Number(localStorage.getItem('med.leftW'))
+    const m = Number(localStorage.getItem('med.midW'))
+    const r = Number(localStorage.getItem('med.rightW'))
+    if (l >= 120 && l <= 320) leftWidth.value = l
+    if (m >= 280 && m <= 900) midWidth.value = m
+    if (r >= 220 && r <= 800) rightWidth.value = r
+  } catch { }
+}
+function isWideCenter() { return tab.value === 'read' || tab.value === 'graph' }
+function startResize(which: 'left' | 'right', e: MouseEvent) {
+  resizing.value = which
+  resizeStartX = e.clientX
+  resizeStartVal = which === 'left' ? leftWidth.value : (isWideCenter() ? rightWidth.value : midWidth.value)
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', endResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+function onResizeMove(e: MouseEvent) {
+  if (!resizing.value) return
+  const dx = e.clientX - resizeStartX
+  if (resizing.value === 'left') {
+    leftWidth.value = Math.min(320, Math.max(120, resizeStartVal + dx))
+  } else if (isWideCenter()) {
+    rightWidth.value = Math.min(760, Math.max(220, resizeStartVal - dx))
+  } else {
+    const maxMid = Math.max(280, window.innerWidth - leftWidth.value - 340)
+    midWidth.value = Math.min(maxMid, Math.max(280, resizeStartVal + dx))
+  }
+}
+function endResize() {
+  if (!resizing.value) return
+  resizing.value = null
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', endResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  try {
+    localStorage.setItem('med.leftW', String(leftWidth.value))
+    localStorage.setItem('med.midW', String(midWidth.value))
+    localStorage.setItem('med.rightW', String(rightWidth.value))
+  } catch { }
+}
+const mineTotal = computed(() => mineSection.value === 'notes' ? notes.value.length
+  : mineSection.value === 'favorites' ? favoritesDetailed.value.length
+  : mineSection.value === 'templates' ? myTemplates.value.length : queries.value.length)
+const mineStart = computed(() => (minePage.value - 1) * minePageSize.value)
+const mineEnd = computed(() => mineStart.value + minePageSize.value)
+const builtinStart = computed(() => (builtinPage.value - 1) * builtinPageSize.value)
+const builtinEnd = computed(() => builtinStart.value + builtinPageSize.value)
+
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
 async function loadAll() {
@@ -106,7 +185,8 @@ async function loadAll() {
     const s = await med.status()
     status.value = s
     if (!clinicalPath.value) clinicalPath.value = s.clinicalDefault || ''
-    const [b, t, tp, qr, nt, fav] = await Promise.all([
+    const [, b, t, tp, qr, nt, fav] = await Promise.all([
+      ensureTerms().catch(() => { }),
       med.books(), med.tags(false),
       med.templates('', { builtin: 0, limit: 500 }), med.queries(), med.notes(), med.tagged('med-favorite'),
     ])
@@ -119,49 +199,44 @@ async function loadFavoritesDetailed() {
   try { favoritesDetailed.value = await med.taggedDetail('med-favorite', 500) } catch { favoritesDetailed.value = [] }
 }
 
-async function doSearch(text = q.value, append = false) {
+async function doSearch(text = q.value, keepPage = false) {
   q.value = text
   if (!text.trim() && activeBooks.value.length && !activeTypes.value.length && !activeTag.value) {
     toast('按数据源筛选时请同时输入关键词', 'warning')
     return
   }
   tab.value = 'search'
-  if (append) loadingMore.value = true; else loading.value = true
+  if (!keepPage) { cardsPage.value = 1; hitsPage.value = 1 }
+  loading.value = true
   try {
+    const isHits = resultTab.value === 'hits'
+    const page = isHits ? hitsPage.value : cardsPage.value
+    const size = isHits ? hitsPageSize.value : cardsPageSize.value
     const r = await med.search({
-      q: text.trim(), offset: append ? (result.value?.hits.length || 0) : 0,
-      limit: append ? 30 : 60, sort: sortMode.value, mode: 'phrase',
+      q: text.trim(), offset: (page - 1) * size, limit: size,
+      sort: sortMode.value, mode: 'phrase',
       types: activeTypes.value, books: activeBooks.value, tags: activeTag.value ? [activeTag.value] : [],
     })
-    if (append && result.value) result.value = { ...r, hits: [...result.value.hits, ...r.hits] }
-    else {
-      result.value = r
-      keyword.value = text.trim()
-      resultTab.value = r.concepts.length ? 'cards' : (r.hits.length ? 'hits' : 'notes')
+    result.value = r
+    keyword.value = text.trim()
+    if (!keepPage) {
+      const want = r.concepts.length ? 'cards' : (r.hits.length ? 'hits' : 'notes')
+      if (want !== resultTab.value) {
+        resultTab.value = want
+        void doSearch(keyword.value, true)
+      }
     }
   } catch (e: any) { toast(e?.message || '检索失败') }
-  finally { loading.value = false; loadingMore.value = false; suggest.value = [] }
+  finally { loading.value = false; suggest.value = [] }
 }
 
-function loadMoreHits() {
-  if (!result.value || loadingMore.value) return
-  if (result.value.hits.length >= result.value.hitTotal) return
-  void doSearch(keyword.value, true)
-}
+/** 分页组件的页码/每页数量变化：保持当前关键词与筛选，只换页。 */
+function refreshPage() { void doSearch(keyword.value || q.value, true) }
 
-async function loadMoreCards() {
-  if (!result.value || loadingMore.value) return
-  if (result.value.concepts.length >= result.value.conceptTotal) return
-  loadingMore.value = true
-  try {
-    const r = await med.search({
-      q: keyword.value, offset: result.value.concepts.length, limit: 60,
-      sort: sortMode.value, mode: 'phrase', types: activeTypes.value,
-      books: activeBooks.value, tags: activeTag.value ? [activeTag.value] : [],
-    })
-    result.value = { ...result.value, concepts: [...result.value.concepts, ...r.concepts], conceptTotal: r.conceptTotal, total: r.total }
-  } catch (e: any) { toast(e?.message || '加载失败') }
-  finally { loadingMore.value = false }
+function switchResultTab(next: 'cards' | 'hits' | 'notes') {
+  if (resultTab.value === next) return
+  resultTab.value = next
+  if (result.value) void doSearch(keyword.value || q.value, true)
 }
 
 let suggestTimer: ReturnType<typeof setTimeout> | null = null
@@ -190,6 +265,7 @@ async function loadChapter(id: string, chunkId = '', terms = '', pStart = 0) {
     chapter.value = await med.chapter(id)
     currentTarget.value = { type: 'chapter', id, label: chapter.value?.title || '' }
     await nextTick()
+    if (!termCount()) await ensureTerms().catch(() => { })
     highlight(terms)
     if (chunkId) {
       const el = chapterBox.value?.querySelector(`[data-p="${pStart}"]`) as HTMLElement | null
@@ -202,34 +278,28 @@ async function loadChapter(id: string, chunkId = '', terms = '', pStart = 0) {
   finally { busy.value = '' }
 }
 
+/** 精读正文：命中查询词 → mark；数据库中所有概念（含缩写别名）→ 可点击下划链接。 */
 function highlight(terms: string) {
   const root = chapterBox.value
   if (!root) return
-  const words = (terms || '').split(/[\s,，+]+/).filter(w => w.length >= 2).slice(0, 5)
-  const extra = chapter.value?.concepts.slice(0, 6).map(c => c.name) || []
-  const list = [...new Set([...words, ...extra])].filter(Boolean)
-  if (!list.length) return
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const nodes: Text[] = []
-  while (walker.nextNode()) {
-    const n = walker.currentNode as Text
-    if (n.parentElement?.closest('mark')) continue
-    nodes.push(n)
+  termLinkCount.value = linkifyDom(root, terms, concept.value?.id)
+}
+
+/** 页面级点击委托：精读正文、模板预览等处的词条链接统一跳到概念详情。 */
+function onTermClick(e: MouseEvent) {
+  const id = termIdFromEvent(e)
+  if (id) {
+    e.preventDefault(); e.stopPropagation()
+    void openConcept(id)
+    document.querySelector('.med-right')?.scrollTo({ top: 0, behavior: 'smooth' })
+    return
   }
-  const re = new RegExp('(' + list.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi')
-  for (const n of nodes) {
-    const text = n.nodeValue || ''
-    if (!re.test(text)) { re.lastIndex = 0; continue }
-    re.lastIndex = 0
-    const frag = document.createDocumentFragment()
-    let last = 0, m: RegExpExecArray | null
-    while ((m = re.exec(text))) {
-      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)))
-      const mk = document.createElement('mark'); mk.textContent = m[0]; frag.appendChild(mk)
-      last = m.index + m[0].length
-    }
-    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)))
-    n.parentNode?.replaceChild(frag, n)
+  // 数据库未收录的命中词：点击跳到该词的全文检索结果
+  const word = termWordFromEvent(e)
+  if (word) {
+    e.preventDefault(); e.stopPropagation()
+    resultTab.value = 'hits'
+    void doSearch(word)
   }
 }
 
@@ -561,6 +631,29 @@ async function pickClinicalFolder() {
   if (p) clinicalPath.value = p
 }
 
+async function pickJsonBook() {
+  const p = await host.pickFile('any', '选择 PaddleOCR-VL 导出的 JSON 图书')
+  if (p) jsonBookPath.value = p
+}
+async function pickJsonBookFolder() {
+  const p = await host.pickFolder('选择存放 OCR JSON 图书的目录（批量导入）')
+  if (p) jsonBookPath.value = p
+}
+async function importJsonBooks() {
+  const p = jsonBookPath.value.trim()
+  if (!p) { toast('请选择 JSON 文件或包含 JSON 图书的目录', 'warning'); return }
+  busy.value = 'OCR JSON 图书导入中（图片下载 + 建索引）'
+  try {
+    const r = await med.importJsonBook(p, false)
+    if (r.error) { toast(r.error); return }
+    const j = r.jobId ? await pollJob(r.jobId) : null
+    report.value = j?.report || r
+    await loadAll()
+    toast(`已导入 ${report.value?.books || 0} 本 / ${report.value?.chapters || 0} 章 / 图片 ${report.value?.images || 0} 张`)
+  } catch (e: any) { toast(e?.message || 'JSON 图书导入失败') }
+  finally { busy.value = '' }
+}
+
 function openData(tabName: 'sources' | 'import' | 'maintain' = 'sources') {
   dataTab.value = tabName
   showData.value = true
@@ -591,6 +684,7 @@ async function expandGraph(depth: 1 | 2) {
 function openMine(section: 'notes' | 'favorites' | 'templates' | 'queries' = 'notes') {
   tab.value = 'mine'
   mineSection.value = section
+  minePage.value = 1
   if (section === 'notes') med.notes().then(n => notes.value = n).catch(() => { })
   if (section === 'favorites') void loadFavoritesDetailed()
   if (section === 'templates') med.templates('', { builtin: 0, limit: 500 }).then(t => templates.value = t).catch(() => { })
@@ -678,6 +772,7 @@ watch(() => JSON.stringify(route.query), async () => {
   }
 })
 onMounted(async () => {
+  loadWidths()
   await loadAll()
   window.addEventListener('keydown', onKey)
   const v = route.query
@@ -689,11 +784,15 @@ onMounted(async () => {
     await doSearch('')
   }
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', endResize)
+})
 </script>
 
 <template>
-  <div class="med-page">
+  <div class="med-page" @click="onTermClick">
     <header class="med-top">
       <div class="med-brand">
         <div class="med-logo">医</div>
@@ -703,6 +802,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
       <div class="med-top-actions">
+        <button class="med-btn" @click="openData('import')">＋ 添加数据源</button>
         <button class="med-btn" @click="showHelp = true">使用说明</button>
         <button class="med-btn" @click="openData('sources')">数据与设置</button>
       </div>
@@ -722,17 +822,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </div>
     </div>
 
-    <div class="med-body">
+    <div class="med-body" :class="{ 'is-reading': isWideCenter(), 'is-resizing': resizing }" :style="bodyStyle">
+      <div class="med-resizer med-resizer-left" title="拖动调整左栏宽度" @mousedown.prevent="startResize('left', $event)"></div>
+      <div class="med-resizer med-resizer-right" title="拖动调整中间 / 右侧详情宽度" @mousedown.prevent="startResize('right', $event)"></div>
       <aside class="med-left">
-        <section>
-          <div class="med-sec-head"><span>数据源</span><em>{{ books.length }} 本</em></div>
-          <div v-for="b in books" :key="b.id" class="med-book" :class="{ active: activeBooks.includes(b.id) }" @click="toggleBook(b.id)">
-            <div class="med-book-title">{{ b.volume ? '[' + b.volume + '] ' : '' }}{{ b.title }}</div>
-            <div class="med-book-meta">{{ b.status === 'ready' ? `${b.chapterCount} 章 · ${b.chunkCount} 段` : b.status }}
-              <span v-if="b.error" class="med-err">{{ b.error }}</span></div>
-          </div>
-          <button class="med-add-book" @click="openData('import')">＋ 添加数据源</button>
-        </section>
         <section>
           <div class="med-sec-head"><span>类型筛选</span><button v-if="activeTypes.length" @click="activeTypes = []; doSearch()">清除</button></div>
           <div class="med-chips">
@@ -796,9 +889,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           </div>
           <template v-else>
             <div class="med-result-tabs">
-              <button :class="{ on: resultTab === 'cards' }" @click="resultTab = 'cards'">临床速查 <em>{{ result.conceptTotal }}</em></button>
-              <button :class="{ on: resultTab === 'hits' }" @click="resultTab = 'hits'">原文段落 <em>{{ result.hitTotal }}</em></button>
-              <button :class="{ on: resultTab === 'notes' }" @click="resultTab = 'notes'">相关注释 <em>{{ result.notes.length }}</em></button>
+              <button :class="{ on: resultTab === 'cards' }" @click="switchResultTab('cards')">临床速查 <em>{{ result.conceptTotal }}</em></button>
+              <button :class="{ on: resultTab === 'hits' }" @click="switchResultTab('hits')">原文段落 <em>{{ result.hitTotal }}</em></button>
+              <button :class="{ on: resultTab === 'notes' }" @click="switchResultTab('notes')">相关注释 <em>{{ result.notes.length }}</em></button>
               <select v-model="sortMode" class="med-mini-select" @change="doSearch()">
                 <option value="relevance">按相关度</option>
                 <option value="book_order">按书内顺序</option>
@@ -808,14 +901,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div v-if="resultTab === 'cards'">
               <div v-if="!result.concepts.length" class="med-hint">没有匹配的临床条目。可换个词，或选择左侧分类浏览。</div>
               <div class="med-concept-grid">
-                <MedCard v-for="c in resultCards" :key="c.id" :concept="c" compact
+                <MedCard v-for="c in resultCards" :key="c.id" :concept="c" compact :q="q"
                          :favorited="isFav('concept', c.id)"
-                         @open="openCard(c)" @search="doSearch"
+                         @open="openCard(c)" @search="doSearch" @open-term="openConcept"
                          @favorite="favorite('concept', c.id, c.name)" @graph="showGraph" @open-hit="openHit" />
               </div>
-              <div v-if="result.concepts.length < result.conceptTotal" class="med-more">
-                <button :disabled="loadingMore" @click="loadMoreCards">{{ loadingMore ? '加载中…' : `加载更多（已显示 ${result.concepts.length}/${result.conceptTotal}）` }}</button>
-              </div>
+              <MedPager :total="result.conceptTotal" :page="cardsPage" :page-size="cardsPageSize"
+                        :sizes="[4, 8, 12, 20, 50]" label="张"
+                        @update:page="cardsPage = $event" @update:page-size="cardsPageSize = $event" @change="refreshPage" />
             </div>
 
             <div v-else-if="resultTab === 'hits'">
@@ -830,9 +923,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                   <button class="med-jump">跳转 →</button>
                 </div>
               </div>
-              <div v-if="result.hits.length < result.hitTotal" class="med-more">
-                <button :disabled="loadingMore" @click="loadMoreHits">{{ loadingMore ? '加载中…' : `加载更多（已显示 ${result.hits.length}/${result.hitTotal}）` }}</button>
-              </div>
+              <MedPager :total="result.hitTotal" :page="hitsPage" :page-size="hitsPageSize"
+                        :sizes="[10, 20, 50, 100]" label="段"
+                        @update:page="hitsPage = $event" @update:page-size="hitsPageSize = $event" @change="refreshPage" />
             </div>
 
             <div v-else>
@@ -884,14 +977,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               </div>
               <div class="med-side-sec" v-if="concept">
                 <div class="med-sec-head"><span>概念详情</span><button @click="concept = null">×</button></div>
-                <MedCard :concept="concept" compact :favorited="isFav('concept', concept!.id)" @search="doSearch"
-                         @favorite="favorite('concept', concept!.id, concept!.name)" @graph="showGraph" @open-hit="openHit" @open="openConcept(concept!.id)" />
+                <MedCard :concept="concept" compact :q="q" :favorited="isFav('concept', concept!.id)" @search="doSearch"
+                         @favorite="favorite('concept', concept!.id, concept!.name)" @graph="showGraph" @open-hit="openHit"
+                         @open-term="openConcept" @open="openConcept(concept!.id)" />
               </div>
               <div class="med-side-sec">
-                <div class="med-sec-head"><span>本章目录</span></div>
+                <div class="med-sec-head"><span>本章目录</span><em>{{ chapter?.siblings.length || 0 }} 节</em></div>
                 <div class="med-siblings">
                   <button v-for="s in chapter?.siblings || []" :key="s.id" :class="{ on: s.id === chapter?.chapterId }"
-                          @click="goChapter(s.id)">{{ s.title }}</button>
+                          :data-no="s.ord + 1" :title="s.title" @click="goChapter(s.id)">{{ s.title }}</button>
                 </div>
               </div>
             </aside>
@@ -920,17 +1014,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <template v-if="mineSection === 'notes'">
               <div class="med-mine-head"><strong>我的注释</strong><button class="med-btn" @click="newNote">＋ 新建注释</button></div>
               <div v-if="!notes.length" class="med-hint">还没有注释。在精读页选中文字，点「＋ 注释」即可保存并支持 [[双链]]。</div>
-              <div v-for="n in notes" :key="n.id" class="med-mine-row" @click="editNote(n)">
-                <div><strong>{{ n.title || '未命名注释' }}</strong><em>{{ n.targetType }} · {{ n.quote || n.body }}</em></div>
-                <span class="med-row-actions"><button @click.stop="removeNote(n)">删除</button></span>
+              <div class="med-mine-grid">
+                <div v-for="n in notes.slice(mineStart, mineEnd)" :key="n.id" class="med-mine-row" @click="editNote(n)">
+                  <div><strong>{{ n.title || '未命名注释' }}</strong><em>{{ n.targetType }} · {{ n.quote || n.body }}</em></div>
+                  <span class="med-row-actions"><button @click.stop="removeNote(n)">删除</button></span>
+                </div>
               </div>
             </template>
             <template v-else-if="mineSection === 'favorites'">
               <div class="med-mine-head"><strong>我的收藏</strong><span class="med-hint">在概念、章节或原文段落上点 ☆ 收藏</span></div>
               <div v-if="!favoritesDetailed.length" class="med-hint">还没有收藏内容。</div>
-              <div v-for="f in favoritesDetailed" :key="f.targetType + f.targetId" class="med-mine-row" @click="openFavoriteItem(f)">
-                <div><strong>{{ f.label || f.targetId }}</strong><em>{{ f.type ? (TYPE_LABEL[f.type] || f.type) : f.targetType }}{{ f.sub ? ' · ' + f.sub : '' }}</em></div>
-                <span class="med-row-actions">打开</span>
+              <div class="med-mine-grid">
+                <div v-for="f in favoritesDetailed.slice(mineStart, mineEnd)" :key="f.targetType + f.targetId" class="med-mine-row" @click="openFavoriteItem(f)">
+                  <div><strong>{{ f.label || f.targetId }}</strong><em>{{ f.type ? (TYPE_LABEL[f.type] || f.type) : f.targetType }}{{ f.sub ? ' · ' + f.sub : '' }}</em></div>
+                  <span class="med-row-actions">打开</span>
+                </div>
               </div>
             </template>
             <template v-else-if="mineSection === 'templates'">
@@ -940,30 +1038,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <button class="med-btn" @click="openBuiltin">内置模板库（{{ builtinCount }}）</button>
               </div>
               <div v-if="!myTemplates.length" class="med-hint">还没有自己的模板。可从内置模板库另存，或新建笔记/文书模板。</div>
-              <div v-for="t in myTemplates" :key="t.id" class="med-mine-row" @click="openTemplate(t)">
-                <div><strong>{{ t.name }}</strong><em>{{ t.kind }} · {{ templateBody(t).slice(0, 70) }}</em></div>
-                <span class="med-row-actions"><button @click.stop="deleteTemplate(t)">删除</button></span>
+              <div class="med-mine-grid">
+                <div v-for="t in myTemplates.slice(mineStart, mineEnd)" :key="t.id" class="med-mine-row" @click="openTemplate(t)">
+                  <div><strong>{{ t.name }}</strong><em>{{ t.kind }} · {{ templateBody(t).slice(0, 70) }}</em></div>
+                  <span class="med-row-actions"><button @click.stop="deleteTemplate(t)">删除</button></span>
+                </div>
               </div>
             </template>
             <template v-else>
               <div class="med-mine-head"><strong>检索式</strong><span class="med-hint">保存常用组合：关键词 + 类型 + 分类</span></div>
               <div v-if="!queries.length" class="med-hint">还没有保存的检索式。检索后点搜索框右侧「保存检索式」。</div>
-              <div v-for="qitem in queries" :key="qitem.id" class="med-mine-row" @click="applyQuery(qitem)">
-                <div><strong>{{ qitem.name }}</strong><em>{{ qitem.dslJson }}</em></div>
-                <span class="med-row-actions"><button @click.stop="deleteQuery(qitem)">删除</button></span>
+              <div class="med-mine-grid">
+                <div v-for="qitem in queries.slice(mineStart, mineEnd)" :key="qitem.id" class="med-mine-row" @click="applyQuery(qitem)">
+                  <div><strong>{{ qitem.name }}</strong><em>{{ qitem.dslJson }}</em></div>
+                  <span class="med-row-actions"><button @click.stop="deleteQuery(qitem)">删除</button></span>
+                </div>
               </div>
             </template>
+            <MedPager :total="mineTotal" :page="minePage" :page-size="minePageSize"
+                      :sizes="[4, 8, 12, 20, 50]" label="条"
+                      @update:page="minePage = $event" @update:page-size="minePageSize = $event" />
           </div>
         </div>
       </main>
 
       <aside class="med-right">
         <section>
-          <div class="med-sec-head"><span>概念详情</span></div>
+          <div class="med-sec-head"><span>概念详情</span><button v-if="concept" @click="showConceptWide = true" title="放大详情">放大</button></div>
           <div v-if="conceptLoading" class="med-hint">正在加载…</div>
-          <MedCard v-else-if="concept" :concept="concept" :favorited="isFav('concept', concept.id)"
+          <MedCard v-else-if="concept" :concept="concept" :q="q" :favorited="isFav('concept', concept.id)"
                    @search="doSearch" @favorite="favorite('concept', concept.id, concept.name)"
-                   @graph="showGraph" @open-hit="openHit" @open="openConcept(concept.id)" />
+                   @graph="showGraph" @open-hit="openHit" @open-term="openConcept" @open="openConcept(concept.id)" />
           <div v-else class="med-hint">点击检索结果中的概念卡查看结构、原文出处与相关条目。卡片本身可点击。</div>
           <button v-if="concept?.type === 'leaflet'" class="med-btn primary" style="margin-top:8px;width:100%" @click="openLeaflet(concept)">打开说明书</button>
           <div v-if="concept" class="med-detail-actions">
@@ -1060,6 +1165,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button class="med-primary" @click="importCustom">导入</button>
             </div>
 
+            <h4>OCR JSON 图书（PaddleOCR-VL 格式）</h4>
+            <p class="med-hint">自动把 JSON 里引用的远程图片下载到 data/medical/jsonbooks/，按页生成章节与段落索引；原始 JSON 不修改。可选单个 .json，也可选整个目录批量导入（同格式即可，以后新增图书直接放目录里再导入）。</p>
+            <div class="med-row">
+              <input v-model="jsonBookPath" class="med-mini-input" placeholder="JSON 文件路径，或包含 JSON 图书的目录" />
+              <button @click="pickJsonBook">选择文件</button>
+              <button @click="pickJsonBookFolder">选择目录</button>
+              <button class="med-primary" @click="importJsonBooks">导入</button>
+            </div>
+
             <h4>药品说明书速查</h4>
             <div class="med-leaflet">
               <input v-for="k in ['name','brand','spec','indication','dosage','contraindication','adverse','interaction','storage']" :key="k"
@@ -1121,7 +1235,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <ul>
             <li>搜不到：先到「数据与设置 → 数据源」确认书籍状态为 ready、章节数不为 0。</li>
             <li>章节没有正文：Markdown 导入需要重新导入以生成段落；EPUB 原文件移动后路径会失效。</li>
-            <li>想要更长结果：原文段落底部有「加载更多」；分类浏览按分类名称排序。</li>
+            <li>结果太多时用底部分页条：可设置每页数量、点页码或输入页码跳转；默认卡片每页 4 张（两行）、原文每页 10 段。</li>
           </ul>
           <p class="med-hint">详细文档：docs/医学助手使用说明.md · 数据保存在 data/medical.db。</p>
         </div>
@@ -1221,11 +1335,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <button @click="loadBuiltin(builtinQuery)">搜索</button>
           </div>
           <div v-if="buildingBuiltin" class="med-hint">正在读取…</div>
-          <button v-for="t in builtinTemplates" :key="t.id" class="med-mine-row" @click="openTemplate(t)">
-            <div><strong>{{ t.name }}</strong><em>{{ templateBody(t).slice(0, 90) }}</em></div>
-            <span class="med-row-actions">预览</span>
-          </button>
+          <div class="med-mine-grid">
+            <button v-for="t in builtinTemplates.slice(builtinStart, builtinEnd)" :key="t.id" class="med-mine-row" @click="openTemplate(t)">
+              <div><strong>{{ t.name }}</strong><em>{{ templateBody(t).slice(0, 90) }}</em></div>
+              <span class="med-row-actions">预览</span>
+            </button>
+          </div>
+          <MedPager :total="builtinTemplates.length" :page="builtinPage" :page-size="builtinPageSize"
+                    :sizes="[4, 8, 12, 20, 50]" label="份"
+                    @update:page="builtinPage = $event" @update:page-size="builtinPageSize = $event" />
           <div v-if="!buildingBuiltin && !builtinTemplates.length" class="med-hint">没有匹配的内置模板。</div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showConceptWide && concept" class="med-modal-mask" @click.self="showConceptWide = false">
+      <div class="med-modal wide">
+        <div class="med-modal-head"><strong>词条详情 · {{ concept.name }}</strong><button @click="showConceptWide = false">×</button></div>
+        <div class="med-modal-body">
+          <MedCard :concept="concept" :q="q" :favorited="isFav('concept', concept.id)"
+                   @search="doSearch" @favorite="favorite('concept', concept.id, concept.name)"
+                   @graph="showGraph" @open-hit="openHit" @open-term="openConcept" />
         </div>
       </div>
     </div>
@@ -1249,7 +1379,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .med-suggest button { display: flex; justify-content: space-between; width: 100%; border: none; background: none; color: var(--text); padding: 8px 12px; font-size: 12px; cursor: pointer; text-align: left; }
 .med-suggest button:hover { background: var(--panel-2); }
 .med-suggest em { color: var(--text-3); font-style: normal; font-size: 11px; }
-.med-body { display: grid; grid-template-columns: 216px minmax(0, 1fr) 290px; flex: 1; min-height: 0; }
+.med-body { position: relative; display: grid; grid-template-columns: var(--med-left, 180px) var(--med-mid, 520px) minmax(0, 1fr); flex: 1; min-height: 0; }
 .med-left, .med-right { overflow-y: auto; padding: 14px 12px 40px; border-right: 1px solid var(--border); }
 .med-right { border-right: none; border-left: 1px solid var(--border); }
 .med-left section, .med-right section { margin-bottom: 20px; }
@@ -1313,9 +1443,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .med-side-sec { margin-bottom: 18px; }
 .med-side-note { font-size: 11.5px; color: var(--text-2); padding: 6px; border-radius: 7px; background: var(--panel-2); margin-bottom: 5px; }
 .med-side-note em { font-style: normal; color: var(--text-3); font-size: 10.5px; }
-.med-siblings { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
-.med-siblings button { border: none; background: none; color: var(--text-3); text-align: left; font-size: 11px; padding: 4px 6px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.med-siblings button:hover, .med-siblings button.on { background: var(--panel-2); color: var(--accent); }
+/* 本章目录：每行给足高度、标题允许换行完整显示，避免单行 ellipsis 看不清 */
+.med-siblings { display: flex; flex-direction: column; gap: 5px; max-height: 52vh; overflow-y: auto; padding-right: 4px; }
+.med-siblings button {
+  display: block; width: 100%; min-height: 38px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2);
+  text-align: left; font-size: 12px; line-height: 1.55; padding: 8px 10px;
+  border-radius: 8px; cursor: pointer; white-space: normal; word-break: break-word; overflow-wrap: anywhere;
+}
+.med-siblings button::before {
+  content: attr(data-no); display: inline-block; min-width: 24px; margin-right: 6px;
+  color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.med-siblings button:hover { border-color: var(--border-strong); color: var(--text); background: var(--panel-3); }
+.med-siblings button.on {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+  font-weight: 600; box-shadow: inset 3px 0 0 var(--accent);
+}
+.med-siblings button.on::before { color: var(--accent); }
 .med-graph-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .med-graph-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-3); }
 .med-graph-bar .med-mini-input { width: 220px; }
@@ -1374,8 +1519,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .med-note-card { display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; color: var(--text); }
 .med-note-card:hover { border-color: var(--accent); }
 .med-note-card p { margin: 0; font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.med-more { text-align: center; padding: 12px 0 4px; }
-.med-more button { border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); border-radius: 8px; padding: 7px 16px; font-size: 11.5px; cursor: pointer; }
 .med-side-link { display: flex; justify-content: space-between; width: 100%; border: none; background: none; color: var(--text-2); border-radius: 7px; padding: 7px 6px; font-size: 11.5px; cursor: pointer; text-align: left; }
 .med-side-link:hover { background: var(--panel-2); color: var(--text); }
 .med-side-link em { font-style: normal; color: var(--text-3); }
@@ -1430,4 +1573,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .med-anchor-jump { flex: 1; min-width: 0; border: none; background: none; color: var(--text-2); text-align: left; font-size: 11.5px; padding: 5px 6px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .med-anchor-jump:hover { background: var(--panel-2); color: var(--accent); }
 .med-anchor-del { border: none; background: none; color: var(--text-3); cursor: pointer; }
+
+/* v1.4 列表页：窄卡片列 + 宽详情；精读/图谱页：宽正文 + 窄右侧详情，两者都可拖动 */
+.med-body.is-reading { grid-template-columns: var(--med-left, 180px) minmax(0, 1fr) var(--med-right, 320px); }
+.med-read-body { grid-template-columns: minmax(0, 1fr) 300px; }
+.med-concept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.med-mine-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 4px; }
+.med-mine-grid .med-mine-row { width: 100%; margin-bottom: 0; }
+.med-modal.wide { width: min(900px, 92vw); }
+
+/* 精读正文与详情页里的词条下划链接 */
+.med-page :deep(.med-term) { color: var(--accent-2); background: rgba(110, 168, 254, .08); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; padding: 0 1px; }
+.med-page :deep(.med-term:hover) { color: var(--accent); background: var(--accent-soft); text-decoration: underline solid; }
+.med-page :deep(.med-hit), .med-content :deep(mark) { background: rgba(255, 200, 87, .24); color: #ffd479; border-radius: 3px; padding: 0 2px; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+@media (max-width: 1180px) {
+  .med-body { grid-template-columns: var(--med-left, 180px) minmax(260px, var(--med-mid, 520px)) minmax(0, 1fr); }
+  .med-body.is-reading { grid-template-columns: var(--med-left, 180px) minmax(0, 1fr) var(--med-right, 320px); }
+  .med-concept-grid, .med-mine-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 两条可拖动分隔条：左栏 / 中间，中间 / 右侧详情 */
+.med-resizer { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 25; cursor: col-resize; }
+.med-resizer::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .15s; }
+.med-resizer:hover::after, .med-body.is-resizing .med-resizer::after { background: var(--accent); }
+.med-resizer-left { left: calc(var(--med-left, 180px) - 4px); }
+.med-resizer-right { left: calc(var(--med-left, 180px) + var(--med-mid, 520px) - 4px); }
+.med-body.is-reading .med-resizer-right { left: auto; right: calc(var(--med-right, 320px) - 4px); }
+.med-body.is-resizing { user-select: none; }
 </style>

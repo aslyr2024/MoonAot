@@ -152,12 +152,11 @@ ORDER BY b.added_at,c.ord,k.ord;
 
         if (scope == null || scope.Contains("concept"))
         {
-            result.Concepts = MedConcepts.SearchLite(q, dsl.Types.Count > 0 || tagFilter.Active ? 60 : 16);
-            if (dsl.Types.Count > 0)
-                result.Concepts = result.Concepts.Where(c => dsl.Types.Contains(c.Type, StringComparer.OrdinalIgnoreCase)).ToList();
-            if (tagFilter.Active)
-                result.Concepts = result.Concepts.Where(c => tagFilter.ConceptIds.Contains(c.Id)).ToList();
-            if (result.Concepts.Count > 24) result.Concepts = result.Concepts.Take(24).ToList();
+            var (items, total) = MedConcepts.SearchPage(q, limit, Math.Max(0, dsl.Offset),
+                dsl.Types.Count > 0 ? dsl.Types : null,
+                tagFilter.Active ? tagFilter.ConceptIds : null);
+            result.Concepts = items;
+            result.ConceptTotal = total;
         }
 
         // 同义词/缩写扩展：「心梗」→「急性心肌梗死」，简称也能召回正式术语的原文段落
@@ -255,8 +254,7 @@ ORDER BY b.added_at,c.ord,k.ord;
         if (scope == null || scope.Contains("template"))
             result.Templates = MedStore.Templates("", 800).Where(t => t.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).Take(20).ToList();
 
-        result.Total = result.Concepts.Count + result.HitTotal + result.Notes.Count + result.Templates.Count;
-        result.ConceptTotal = result.Concepts.Count;
+        result.Total = result.ConceptTotal + result.HitTotal + result.Notes.Count + result.Templates.Count;
         result.Mode = result.Mode.StartsWith("fts-error", StringComparison.Ordinal) ? result.Mode + " / " + mode : mode;
         result.TookMs = sw.ElapsedMilliseconds;
         return result;

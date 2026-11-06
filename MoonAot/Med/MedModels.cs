@@ -6,6 +6,15 @@ using System.Text.Json.Serialization;
 namespace MoonAot.Med;
 
 /// <summary>医学助手全部 API DTO。字段保持简单类型，供 NativeAOT 源生成序列化。</summary>
+/// <summary>精读页全量词条索引项（轻量，一次加载到前端做最长匹配高亮）。</summary>
+public class MedTermDto
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string Label { get; set; } = "";
+}
+
 public class MedOk
 {
     public bool Ok { get; set; }
@@ -273,6 +282,7 @@ public class MedImportReportDto
     public int Links { get; set; }
     public int AnchorTotal { get; set; }
     public int AnchorResolved { get; set; }
+    public int Images { get; set; }
     public long Chars { get; set; }
     public long ElapsedMs { get; set; }
     public long DbBytes { get; set; }
@@ -370,6 +380,7 @@ public class MedDocTemplateContent
 [JsonSerializable(typeof(MedExportDto))]
 [JsonSerializable(typeof(MedDocTemplateContent))]
 [JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(List<MedTermDto>))]
 [JsonSerializable(typeof(List<int>))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]

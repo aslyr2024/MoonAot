@@ -64,6 +64,24 @@ public static class MedConcepts
         }
     }
 
+    /// <summary>精读页用：全部概念名 + 缩写别名，供前端做全量最长匹配高亮与词条跳转。</summary>
+    public static List<MedTermDto> Terms()
+    {
+        var list = new List<MedTermDto>();
+        foreach (var c in All())
+            list.Add(new MedTermDto { Id = c.Id, Name = c.Name, Type = c.Type, Label = c.Name });
+        using (var cn = MedDatabase.Instance.Open())
+        using (var cmd = Cmd(cn, "SELECT term,canonical_id FROM med_synonyms;"))
+        using (var r = cmd.ExecuteReader())
+            while (r.Read())
+            {
+                var term = r.GetString(0);
+                if (term.Length < 2) continue;
+                list.Add(new MedTermDto { Id = r.GetString(1), Name = term, Type = "alias", Label = term });
+            }
+        return list;
+    }
+
     /// <summary>导入 clinical JSON（默认快照复制到 data/medical/sources/clinical/&lt;version&gt;）。</summary>
     public static (int Count, string Version, List<string> Messages) ImportClinical(string? sourceDir, bool snapshot, Action<string>? progress = null)
     {
@@ -525,14 +543,19 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
         return caps.Length >= 2 ? caps.ToLowerInvariant() : pinyin.ToLowerInvariant();
     }
 
-    public static List<MedConceptDto> SearchLite(string q, int limit = 12)
+    public static List<MedConceptDto> SearchLite(string q, int limit = 12) => SearchPage(q, limit, 0).Items;
+
+    /// <summary>概念卡服务端分页：返回当前页与全量匹配总数（不再把结果截断成固定 16/24 条）。</summary>
+    public static (List<MedConceptDto> Items, int Total) SearchPage(
+        string q, int limit, int offset, List<string>? types = null, HashSet<string>? conceptIds = null)
     {
         var norm = MedText.NormalizeTitle(q);
-        var py = q.Trim().ToLowerInvariant();
-        var all = All();
+        var py = (q ?? "").Trim().ToLowerInvariant();
         var scored = new List<(int Score, ConceptLite C)>();
-        foreach (var c in all)
+        foreach (var c in All())
         {
+            if (types != null && types.Count > 0 && !types.Contains(c.Type, StringComparer.OrdinalIgnoreCase)) continue;
+            if (conceptIds != null && !conceptIds.Contains(c.Id)) continue;
             int score = 0;
             if (c.NameNorm == norm) score = 100;
             else if (norm.Length >= 2 && c.NameNorm.StartsWith(norm, StringComparison.Ordinal)) score = 80;
@@ -541,10 +564,12 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
             else if (py.Length >= 3 && c.Pinyin.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 50;
             else if (py.Length >= 2 && c.Pinyin.Contains(py, StringComparison.OrdinalIgnoreCase)) score = 35;
             if (score > 0) scored.Add((score, c));
-            if (scored.Count > 4000) break;
         }
-        return scored.OrderByDescending(x => x.Score).ThenBy(x => x.C.Name.Length).Take(limit)
+        var ordered = scored.OrderByDescending(x => x.Score).ThenBy(x => x.C.Name.Length).ThenBy(x => x.C.Id).ToList();
+        int total = ordered.Count;
+        var items = ordered.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 300))
             .Select(x => ToDto(x.C)).ToList();
+        return (items, total);
     }
 
     public static MedConceptDto ToDto(ConceptLite c) => new()

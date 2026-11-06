@@ -18,7 +18,7 @@ public static class MedStore
 
     public const string FavoriteTagId = "med-favorite";
     /// <summary>医学助手版本，随应用版本一起发布；显示在页面标题与使用说明中。</summary>
-    public const string MedVersion = "1.2.0";
+    public const string MedVersion = "1.3.0";
 
     /// <summary>内置数据源默认位置（机器相关）；状态接口会返回是否存在，前端据此决定“一键导入”是否可用。</summary>
     public static readonly (string Path, string Volume)[] DefaultBookSources =
@@ -523,6 +523,13 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
             }
             catch (Exception ex) { view.Html = "<p>章节读取失败：" + MedText.EscapeHtml(ex.Message) + "</p>"; }
         }
+        else if (book != null && book.Type == "jsonbook")
+        {
+            var file = Path.Combine(MedJsonBook.BookDir(bookId), "chapters", Path.GetFileName(ch.Href));
+            view.Html = File.Exists(file)
+                ? File.ReadAllText(file)
+                : "<p>章节 HTML 缺失，请在「添加数据源」里重新导入这本 JSON 图书。</p>";
+        }
         else if (book != null && book.Type == "markdown")
         {
             using var cn = db.Open();
@@ -554,7 +561,7 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
                 });
             }
             using (var cmd = Cmd(cn, """
-SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf DESC LIMIT 40;
+SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf DESC LIMIT 400;
 """))
             {
                 P(cmd, "$c", chapterId);

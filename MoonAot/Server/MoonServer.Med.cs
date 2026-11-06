@@ -83,9 +83,15 @@ public sealed partial class MoonServer
                     {
                         var book = MedStore.Book(QueryValue(query, "book"));
                         var path = QueryValue(query, "path");
-                        if (book == null || path.Length == 0 || path.Contains("..") || !File.Exists(book.Path))
+                        if (book == null || path.Length == 0 || path.Contains(".."))
                         { SendText(ctx, 404, "asset not found"); return; }
-                        var bytes = MedEpub.ReadAsset(book.Path, Uri.UnescapeDataString(path));
+                        byte[]? bytes;
+                        if (book.Type == "jsonbook")
+                        {
+                            var local = MedJsonBook.ResolveImage(book.Id, Uri.UnescapeDataString(path));
+                            bytes = local != null && File.Exists(local) ? File.ReadAllBytes(local) : null;
+                        }
+                        else bytes = File.Exists(book.Path) ? MedEpub.ReadAsset(book.Path, Uri.UnescapeDataString(path)) : null;
                         if (bytes == null) { SendText(ctx, 404, "asset not found"); return; }
                         var ext = Path.GetExtension(path).ToLowerInvariant();
                         var mime = ext switch
@@ -102,6 +108,8 @@ public sealed partial class MoonServer
                         if (dto == null) { SendJsonString(ctx, 404, MedJson.S(new MedOk { Ok = false, Error = "概念不存在" })); return; }
                         SendJsonString(ctx, 200, MedJson.S(dto)); return;
                     }
+                case "terms":
+                    SendJsonString(ctx, 200, MedJson.S(MedConcepts.Terms())); return;
                 case "concepts":
                     {
                         if (req.HttpMethod == "POST")
@@ -293,6 +301,18 @@ public sealed partial class MoonServer
                     if (volume.Length == 0) volume = GuessVolume(Path.GetFileNameWithoutExtension(path));
                     var report = MedImport.StartBook(path, volume, kind == "markdown" ? "markdown" : "epub");
                     if (QueryBool(query, "wait") || S("wait") is "1" or "true")
+                    {
+                        var job = MedImport.Wait(report.JobId);
+                        if (job?.Report != null) report = job.Report;
+                    }
+                    SendJsonString(ctx, 200, MedJson.S(report)); return;
+                }
+            case "jsonbook":
+                {
+                    if (path.Length == 0 || (!File.Exists(path) && !Directory.Exists(path)))
+                    { SendJsonString(ctx, 400, MedJson.S(new MedImportReportDto { Ok = false, Error = "JSON 文件或目录不存在: " + path })); return; }
+                    var report = MedImport.StartJsonBookBatch(path, S("volume"));
+                    if ((QueryBool(query, "wait") || S("wait") is "1" or "true") && report.JobId.Length > 0)
                     {
                         var job = MedImport.Wait(report.JobId);
                         if (job?.Report != null) report = job.Report;

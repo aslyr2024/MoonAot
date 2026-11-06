@@ -22,6 +22,7 @@ export interface MedHit {
   chapterPath: string; chapterTitle: string; snippet: string; href: string
   pStart: number; pEnd: number; ord: number; score: number; source: string; concepts: string[]
 }
+export interface MedTerm { id: string; name: string; type: string; label: string }
 export interface MedConcept {
   id: string; type: string; name: string; nameNorm: string; pinyin: string; initials: string
   category: string; keywords: string; dataJson: string; summary: string; source: string
@@ -64,7 +65,7 @@ export interface MedGraph { nodes: MedGraphNode[]; edges: MedGraphEdge[]; trunca
 export interface MedReport {
   ok: boolean; kind: string; jobId: string; error?: string; books: number; chapters: number
   chunks: number; concepts: number; hits: number; links: number; anchorTotal: number
-  anchorResolved: number; chars: number; elapsedMs: number; dbBytes: number; messages: string[]
+  anchorResolved: number; images: number; chars: number; elapsedMs: number; dbBytes: number; messages: string[]
 }
 export interface MedJob { id: string; kind: string; running: boolean; done: number; total: number; message: string; report?: MedReport }
 
@@ -75,6 +76,7 @@ export const med = {
   removeBook: (id: string) => apiDelete(`/medapi/books/${encodeURIComponent(id)}`),
   search: (dsl: Record<string, any>) => apiPost<MedSearchResult>('/medapi/search', dsl),
   suggest: (q: string) => apiGet<{ q: string; items: string[]; concepts: MedConcept[] }>('/medapi/suggest', { q, limit: 10 }),
+  terms: () => apiGet<MedTerm[]>('/medapi/terms'),
   concept: (id: string) => apiGet<MedConcept>(`/medapi/concept?id=${encodeURIComponent(id)}`),
   chapter: (id: string) => apiGet<MedChapterView>(`/medapi/chapter?id=${encodeURIComponent(id)}`),
   graph: (center: string, depth = 1) => apiGet<MedGraph>('/medapi/graph', { center, depth, limit: 160 }),
@@ -117,6 +119,8 @@ export const med = {
   importMarkdown: (path: string, wait = false) =>
     apiPost<MedReport>(`/medapi/import/markdown${wait ? '?wait=1' : ''}`, { path, wait: wait ? '1' : '0' }),
   importClinical: (path = '') => apiPost<MedReport>('/medapi/import/clinical', { path, snapshot: '1' }),
+  importJsonBook: (path: string, wait = false) =>
+    apiPost<MedReport>(`/medapi/import/jsonbook${wait ? '?wait=1' : ''}`, { path, wait: wait ? '1' : '0' }),
   importLeaflet: (item: Record<string, string>) => apiPost<MedReport>('/medapi/import/leaflet', item),
   job: (id: string, wait = false) => apiGet<MedJob>(`/medapi/jobs?id=${encodeURIComponent(id)}${wait ? '&wait=1' : ''}`),
 }

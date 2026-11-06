@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MedConcept, MedHit } from './api'
+import { linkifyHtml, termIdFromEvent, termWordFromEvent } from './terms'
 
-const props = defineProps<{ concept: MedConcept; compact?: boolean; favorited?: boolean }>()
+const props = defineProps<{ concept: MedConcept; compact?: boolean; favorited?: boolean; q?: string }>()
 const emit = defineEmits<{
-  open: []; search: [q: string]; favorite: [c: MedConcept]; graph: [c: MedConcept]; openHit: [h: MedHit]
+  open: []; search: [q: string]; favorite: [c: MedConcept]; graph: [c: MedConcept]
+  openHit: [h: MedHit]; openTerm: [id: string]
 }>()
 
 const TYPE_LABEL: Record<string, string> = {
@@ -37,22 +39,33 @@ const fields = computed(() => {
 })
 
 function short(v: string) { return v.length > 180 ? v.slice(0, 180) + '…' : v }
+function linked(v: unknown) { return linkifyHtml(short(String(v)), props.q || '', props.concept.id) }
+function linkedSummary() { return linkifyHtml(short(props.concept.summary || ''), props.q || '', props.concept.id) }
+
+function onCardClick(e: MouseEvent) {
+  // 字段里的概念链接优先：点「梅毒」跳梅毒词条，而不是重新打开当前卡片
+  const id = termIdFromEvent(e)
+  if (id) { e.preventDefault(); e.stopPropagation(); emit('openTerm', id); return }
+  const word = termWordFromEvent(e)
+  if (word) { e.preventDefault(); e.stopPropagation(); emit('search', word); return }
+  if (props.compact) emit('open')
+}
 </script>
 
 <template>
-  <div class="med-card" :class="{ compact, clickable: compact }" @click="emit('open')">
+  <div class="med-card" :class="{ compact, clickable: compact }" @click="onCardClick">
     <div class="med-card-head">
       <span class="med-type" :data-type="concept.type">{{ TYPE_LABEL[concept.type] || concept.type }}</span>
       <strong class="med-card-title">{{ concept.name }}</strong>
       <span v-if="concept.category" class="med-cat">{{ concept.category }}</span>
       <span v-if="concept.hits" class="med-hits">书中 {{ concept.hits }} 处</span>
     </div>
-    <p v-if="concept.summary" class="med-summary">{{ short(concept.summary) }}</p>
+    <p v-if="concept.summary" class="med-summary" v-html="linkedSummary()"></p>
     <div class="med-fields">
       <div v-for="f in fields" :key="f.key" class="med-field">
         <span class="med-field-k">{{ f.label }}</span>
         <div class="med-field-v">
-          <span v-for="(line, i) in f.value" :key="i">{{ short(String(line)) }}</span>
+          <span v-for="(line, i) in f.value" :key="i" v-html="linked(line)"></span>
         </div>
       </div>
     </div>
@@ -103,4 +116,6 @@ function short(v: string) { return v.length > 180 ? v.slice(0, 180) + '…' : v 
 .med-related button:hover, .med-card-actions button:hover { border-color: var(--accent); color: var(--accent); }
 .med-card-actions button.on { border-color: var(--warning); color: var(--warning); }
 .med-card-actions { display: flex; gap: 8px; margin-top: 14px; }
+.med-card :deep(.med-term) { color: var(--accent-2); background: rgba(110, 168, 254, .08); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; padding: 0 1px; }
+.med-card :deep(.med-hit) { background: rgba(255, 200, 87, .24); color: #ffd479; border-radius: 3px; padding: 0 2px; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 </style>
