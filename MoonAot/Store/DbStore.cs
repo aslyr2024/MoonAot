@@ -672,7 +672,9 @@ FROM books;
             }
             f.Formats = GroupCounts(cn, "SELECT format, COUNT(*) c FROM books GROUP BY format ORDER BY c DESC LIMIT 20;");
             f.Authors = GroupCounts(cn, "SELECT author, COUNT(*) c FROM books WHERE author <> '' GROUP BY author ORDER BY c DESC LIMIT 80;");
-            f.Folders = GroupCounts(cn, "SELECT folder, COUNT(*) c FROM books WHERE folder IS NOT NULL AND folder <> '' GROUP BY folder ORDER BY c DESC LIMIT 80;");
+            // 文件夹筛选返回全部目录，下拉框可输入路径搜索。书库有 700+ 个文件夹时，
+            // 无论按数量 Top N 还是按最近导入 Top N 都会漏掉小目录，所以不再做任何截断。
+            f.Folders = GroupCounts(cn, "SELECT folder, COUNT(*) c FROM books WHERE folder IS NOT NULL AND folder <> '' GROUP BY folder ORDER BY c DESC, folder;");
             return f;
         }
     }
