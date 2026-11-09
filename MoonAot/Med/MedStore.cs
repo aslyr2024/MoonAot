@@ -18,7 +18,7 @@ public static class MedStore
 
     public const string FavoriteTagId = "med-favorite";
     /// <summary>医学助手版本，随应用版本一起发布；显示在页面标题与使用说明中。</summary>
-    public const string MedVersion = "1.3.2";
+    public const string MedVersion = "1.3.3";
 
     /// <summary>内置数据源默认位置（机器相关）；状态接口会返回是否存在，前端据此决定“一键导入”是否可用。</summary>
     public static readonly (string Path, string Volume)[] DefaultBookSources =

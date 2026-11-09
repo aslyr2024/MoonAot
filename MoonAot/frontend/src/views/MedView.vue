@@ -38,6 +38,7 @@ const graphQuery = ref('')
 const graphDepth = ref<1 | 2>(1)
 const activeTypes = ref<string[]>([])
 const activeBooks = ref<string[]>([])
+const showBookFilter = ref(false)
 const activeTag = ref('')
 const suggest = ref<MedConcept[]>([])
 const report = ref<MedReport | null>(null)
@@ -201,10 +202,6 @@ async function loadFavoritesDetailed() {
 
 async function doSearch(text = q.value, keepPage = false) {
   q.value = text
-  if (!text.trim() && activeBooks.value.length && !activeTypes.value.length && !activeTag.value) {
-    toast('按数据源筛选时请同时输入关键词', 'warning')
-    return
-  }
   tab.value = 'search'
   if (!keepPage) { cardsPage.value = 1; hitsPage.value = 1 }
   loading.value = true
@@ -745,7 +742,15 @@ function toggleType(k: string) {
 }
 function toggleBook(id: string) {
   activeBooks.value = activeBooks.value.includes(id) ? activeBooks.value.filter(x => x !== id) : [...activeBooks.value, id]
-  if (q.value.trim()) void doSearch()
+  void doSearch(keyword.value || q.value)
+}
+function clearBookFilter() {
+  activeBooks.value = []
+  void doSearch(keyword.value || q.value)
+}
+function selectAllBooks() {
+  activeBooks.value = books.value.map(b => b.id)
+  void doSearch(keyword.value || q.value)
 }
 function onKey(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchInput.value?.focus() }
@@ -912,6 +917,25 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else-if="resultTab === 'hits'">
+              <div class="med-book-filter">
+                <button :class="{ on: showBookFilter }" @click="showBookFilter = !showBookFilter">
+                  书籍筛选 <em>{{ activeBooks.length ? activeBooks.length + ' 本' : '全部' }}</em>
+                </button>
+                <button v-if="activeBooks.length" @click="clearBookFilter">清除</button>
+                <span v-if="activeBooks.length" class="med-hint">仅检索选中书籍的原文段落</span>
+                <div v-if="showBookFilter" class="med-book-filter-panel">
+                  <div class="med-book-filter-actions">
+                    <button @click="selectAllBooks">全选 {{ books.length }} 本</button>
+                    <button @click="clearBookFilter">清空</button>
+                    <span>可多选；留空表示全部书籍</span>
+                  </div>
+                  <label v-for="b in books" :key="b.id" class="med-book-option" :class="{ on: activeBooks.includes(b.id) }">
+                    <input type="checkbox" :checked="activeBooks.includes(b.id)" @change="toggleBook(b.id)" />
+                    <span :title="b.title">{{ b.volume ? '[' + b.volume + '] ' : '' }}{{ b.title }}</span>
+                    <em>{{ b.chapterCount }} 章</em>
+                  </label>
+                </div>
+              </div>
               <div v-if="!result.hits.length" class="med-hint">没有匹配的原文段落。两字词与拼音首字母也能检索；若仍为空，请确认数据源已索引完成。</div>
               <div v-for="h in result.hits" :key="h.chunkId" class="med-hit" @click="openHit(h)">
                 <div class="med-hit-path">{{ h.volume }} · {{ h.bookTitle }} › {{ h.chapterTitle }}</div>
@@ -1600,4 +1624,20 @@ onBeforeUnmount(() => {
 .med-resizer-right { left: calc(var(--med-left, 180px) + var(--med-mid, 520px) - 4px); }
 .med-body.is-reading .med-resizer-right { left: auto; right: calc(var(--med-right, 320px) - 4px); }
 .med-body.is-resizing { user-select: none; }
+
+/* 原文段落：书籍多选筛选 */
+.med-book-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.med-book-filter > button { border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); border-radius: 8px; padding: 5px 10px; font-size: 11.5px; cursor: pointer; }
+.med-book-filter > button:hover, .med-book-filter > button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.med-book-filter > button em { font-style: normal; font-size: 10.5px; opacity: .8; margin-left: 4px; }
+.med-book-filter-panel { width: 100%; border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 10px; max-height: 280px; overflow-y: auto; }
+.med-book-filter-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 10.5px; color: var(--text-3); }
+.med-book-filter-actions button { border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); border-radius: 6px; padding: 4px 9px; font-size: 11px; cursor: pointer; }
+.med-book-filter-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.med-book-option { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; font-size: 11.5px; color: var(--text-2); cursor: pointer; }
+.med-book-option:hover { background: var(--panel-2); }
+.med-book-option.on { color: var(--accent); background: var(--accent-soft); }
+.med-book-option input { accent-color: var(--accent); flex: none; }
+.med-book-option span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.med-book-option em { font-style: normal; flex: none; font-size: 10.5px; color: var(--text-3); }
 </style>

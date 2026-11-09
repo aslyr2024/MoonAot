@@ -206,7 +206,7 @@ ORDER BY b.added_at,c.ord,k.ord;
             var lowerGroups = groups.Select(g => g.Select(t => t.ToLowerInvariant()).Distinct().ToList()).ToList();
             foreach (var s in snap)
             {
-                if (found.Count >= limit * 6 && mode == "fts" && books == null) break;
+                // 不按 limit*6 提前截断：否则「全部书籍」的 hitTotal 会小于「指定书籍」，总数不可比。
                 if (books != null && !books.Contains(s.BookId)) continue;
                 bool all = lowerGroups.All(g => g.Any(t => s.Norm.Contains(t, StringComparison.Ordinal)));
                 if (!all) continue;
@@ -224,7 +224,7 @@ ORDER BY b.added_at,c.ord,k.ord;
                 };
                 FillMeta(hit, s);
                 found[s.ChunkId] = hit;
-                if (found.Count >= limit * 6 && books == null) break;
+                // 同上：全量收集命中，由分页决定返回多少条
             }
             mode = mode == "fts" ? "fts+short" : "short";
         }

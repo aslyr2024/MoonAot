@@ -15,6 +15,11 @@ public static class MedConcepts
     private static readonly object CacheGate = new();
     private static List<ConceptLite> _cache = new();
     private static long _cacheAt;
+    private static Dictionary<string, List<string>> _synonymIndex = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, List<string>> _keywordIndex = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, int> _hitCounts = new(StringComparer.Ordinal);
+    private static long _extrasAt;
+    private static readonly char[] KeywordSeps = { '；', ';', '，', ',', '、', '|', '\r', '\n' };
 
     public sealed class ConceptLite
     {
@@ -26,6 +31,7 @@ public static class MedConcepts
         public string Initials = "";
         public string Category = "";
         public string Summary = "";
+        public string Keywords = "";
         public string DataJson = "{}";
         public string Source = "";
         public int Edited;
@@ -39,7 +45,7 @@ public static class MedConcepts
         ["心梗"] = "急性心肌梗死", ["中风"] = "脑梗死", ["脑梗"] = "脑梗死", ["高血压病"] = "高血压",
     };
 
-    public static void Invalidate() { lock (CacheGate) { _cacheAt = 0; } }
+    public static void Invalidate() { lock (CacheGate) { _cacheAt = 0; _extrasAt = 0; } }
 
     public static List<ConceptLite> All()
     {
@@ -49,18 +55,61 @@ public static class MedConcepts
             var list = new List<ConceptLite>();
             using var cn = MedDatabase.Instance.Open();
             // data_json 可能很大（药品说明书约 100MB），热层只缓存检索字段，详情按需读取
-            using var cmd = Cmd(cn, "SELECT id,type,name,name_norm,pinyin,initials,category,summary,source,edited FROM med_concepts WHERE COALESCE(deleted,0)=0;");
+            using var cmd = Cmd(cn, "SELECT id,type,name,name_norm,pinyin,initials,category,summary,keywords,source,edited FROM med_concepts WHERE COALESCE(deleted,0)=0;");
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new ConceptLite
                 {
                     Id = r.GetString(0), Type = r.GetString(1), Name = r.GetString(2), NameNorm = r.GetString(3),
                     Pinyin = r.GetString(4), Initials = r.GetString(5), Category = r.GetString(6),
-                    Summary = r.GetString(7), DataJson = "{}", Source = r.GetString(8), Edited = r.GetInt32(9),
+                    Summary = r.GetString(7), Keywords = r.GetString(8), DataJson = "{}",
+                    Source = r.GetString(9), Edited = r.GetInt32(10),
                 });
             _cache = list;
             _cacheAt = Environment.TickCount64;
             return list;
+        }
+    }
+
+    /// <summary>检索辅助索引：别名 → 概念、关键词 → 概念、概念 → 书中命中次数（随主缓存一起失效）。</summary>
+    private static void EnsureExtras()
+    {
+        lock (CacheGate)
+        {
+            if (_extrasAt > 0 && Environment.TickCount64 - _extrasAt < 120000) return;
+            var syn = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var hits = new Dictionary<string, int>(StringComparer.Ordinal);
+            using (var cn = MedDatabase.Instance.Open())
+            {
+                using (var cmd = Cmd(cn, "SELECT term,canonical_id FROM med_synonyms;"))
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read())
+                    {
+                        var t = r.GetString(0).Trim().ToLowerInvariant();
+                        if (t.Length < 2) continue;
+                        if (!syn.TryGetValue(t, out var l)) { l = new List<string>(); syn[t] = l; }
+                        l.Add(r.GetString(1));
+                    }
+                using (var cmd = Cmd(cn, "SELECT concept_id, COUNT(*) FROM med_hits GROUP BY concept_id;"))
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) hits[r.GetString(0)] = r.GetInt32(1);
+            }
+            var kw = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in All())
+            {
+                if (c.Keywords.Length == 0) continue;
+                foreach (var part in c.Keywords.Split(KeywordSeps, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var k = part.Trim().ToLowerInvariant();
+                    if (k.Length < 2 || k.Length > 40) continue;
+                    if (!kw.TryGetValue(k, out var l)) { l = new List<string>(); kw[k] = l; }
+                    if (!l.Contains(c.Id)) l.Add(c.Id);
+                }
+            }
+            _synonymIndex = syn;
+            _keywordIndex = kw;
+            _hitCounts = hits;
+            _extrasAt = Environment.TickCount64;
         }
     }
 
@@ -375,9 +424,9 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
                     lastEnd = f.Pos + f.Len;
                     if (!perConcept.TryGetValue(f.Id, out var acc)) { acc = (0, new List<int>()); perConcept[f.Id] = acc; }
                     acc.Tf++;
-                    if (acc.Pos.Count < 12) acc.Pos.Add(f.Pos);
+                    if (acc.Pos.Count < 24) acc.Pos.Add(f.Pos);
                     perConcept[f.Id] = acc;
-                    if (perConcept.Count >= 24) break;
+                    if (perConcept.Count >= 64) break; // 长段落不再只保留 24 个概念
                 }
                 foreach (var kv in perConcept)
                 {
@@ -545,27 +594,67 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
 
     public static List<MedConceptDto> SearchLite(string q, int limit = 12) => SearchPage(q, limit, 0).Items;
 
-    /// <summary>概念卡服务端分页：返回当前页与全量匹配总数（不再把结果截断成固定 16/24 条）。</summary>
+    /// <summary>
+    /// 概念卡服务端分页。召回同时覆盖：概念名、别名、keywords（症状/俗称）、拼音首字母；
+    /// 排序按「匹配精度 → 书中命中次数 → 名称长度」，避免包含匹配按长度堆在前面。
+    /// </summary>
     public static (List<MedConceptDto> Items, int Total) SearchPage(
         string q, int limit, int offset, List<string>? types = null, HashSet<string>? conceptIds = null)
     {
         var norm = MedText.NormalizeTitle(q);
         var py = (q ?? "").Trim().ToLowerInvariant();
-        var scored = new List<(int Score, ConceptLite C)>();
+        EnsureExtras();
+        var synExact = _synonymIndex.TryGetValue(norm, out var sl)
+            ? new HashSet<string>(sl, StringComparer.Ordinal) : null;
+        var kwExact = _keywordIndex.TryGetValue(norm, out var kl)
+            ? new HashSet<string>(kl, StringComparer.Ordinal) : null;
+        var kwPrefix = new HashSet<string>(StringComparer.Ordinal);
+        var kwContains = new HashSet<string>(StringComparer.Ordinal);
+        if (norm.Length >= 3)
+        {
+            foreach (var kv in _keywordIndex)
+            {
+                if (kv.Key.StartsWith(norm, StringComparison.Ordinal))
+                    foreach (var id in kv.Value) kwPrefix.Add(id);
+                else if (kv.Key.Contains(norm, StringComparison.Ordinal))
+                    foreach (var id in kv.Value) kwContains.Add(id);
+            }
+        }
+        var scored = new List<(int Score, int Hits, ConceptLite C)>();
         foreach (var c in All())
         {
             if (types != null && types.Count > 0 && !types.Contains(c.Type, StringComparer.OrdinalIgnoreCase)) continue;
             if (conceptIds != null && !conceptIds.Contains(c.Id)) continue;
             int score = 0;
-            if (c.NameNorm == norm) score = 100;
-            else if (norm.Length >= 2 && c.NameNorm.StartsWith(norm, StringComparison.Ordinal)) score = 80;
-            else if (norm.Length >= 2 && c.NameNorm.Contains(norm, StringComparison.Ordinal)) score = 60;
-            else if (py.Length >= 2 && c.Initials.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 55;
-            else if (py.Length >= 3 && c.Pinyin.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 50;
-            else if (py.Length >= 2 && c.Pinyin.Contains(py, StringComparison.OrdinalIgnoreCase)) score = 35;
-            if (score > 0) scored.Add((score, c));
+            if (norm.Length > 0)
+            {
+                // 名称匹配永远优先于「只在 keywords 里提到该词」的概念，
+                // 否则搜「感染」会把乏力、白血病之类高频词顶到最前面。
+                if (c.NameNorm == norm) score = 10000;
+                else if (norm.Length >= 2 && c.NameNorm.StartsWith(norm, StringComparison.Ordinal))
+                    score = 9000 - Math.Min(300, c.Name.Length * 2);
+                else if (norm.Length >= 2 && c.NameNorm.Contains(norm, StringComparison.Ordinal))
+                {
+                    int at = c.NameNorm.IndexOf(norm, StringComparison.Ordinal);
+                    score = 8000 + Math.Max(0, 240 - at * 20) - Math.Min(300, c.Name.Length * 2);
+                }
+                else if (synExact != null && synExact.Contains(c.Id)) score = 7000;
+                else if (kwExact != null && kwExact.Contains(c.Id)) score = 5000;
+                else if (kwPrefix.Contains(c.Id)) score = 3500;
+                else if (kwContains.Contains(c.Id)) score = 2500;
+                else if (py.Length >= 2 && c.Initials == py) score = 1800;
+                else if (py.Length >= 2 && c.Initials.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 1500;
+                else if (py.Length >= 3 && c.Pinyin.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 1200;
+                else if (py.Length >= 2 && c.Pinyin.Contains(py, StringComparison.OrdinalIgnoreCase)) score = 800;
+            }
+            if (score > 0)
+                scored.Add((score, _hitCounts.TryGetValue(c.Id, out var hc) ? hc : 0, c));
         }
-        var ordered = scored.OrderByDescending(x => x.Score).ThenBy(x => x.C.Name.Length).ThenBy(x => x.C.Id).ToList();
+        var ordered = scored.OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.Hits)
+            .ThenBy(x => x.C.Name.Length)
+            .ThenBy(x => x.C.Id)
+            .ToList();
         int total = ordered.Count;
         var items = ordered.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 300))
             .Select(x => ToDto(x.C)).ToList();
