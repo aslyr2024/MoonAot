@@ -55,6 +55,7 @@ public sealed class MedDatabase
             CreateSchema(cn);
             EnsureColumn(cn, "med_concepts", "edited", "INTEGER NOT NULL DEFAULT 0");
             EnsureColumn(cn, "med_concepts", "deleted", "INTEGER NOT NULL DEFAULT 0");
+            CreateConceptIndexes(cn); // 依赖 edited/deleted 的索引必须在补列之后建
             Initialized = true;
         }
     }
@@ -78,7 +79,26 @@ public sealed class MedDatabase
             using var alter = Cmd(cn, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + ddl + ";");
             alter.ExecuteNonQuery();
         }
-        catch { }
+        catch (Exception ex) { Log.Warn($"[med] 补列 {table}.{column} 失败: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// 依赖 edited/deleted 的索引：CREATE TABLE 已自带这两列，旧库则由 EnsureColumn 补齐，
+    /// 所以必须放在补列之后。以前放在 CreateSchema 里会让全新空库直接抛
+    /// "no such column: deleted" 导致医学助手整个初始化失败。
+    /// </summary>
+    private static void CreateConceptIndexes(SqliteConnection cn)
+    {
+        foreach (var sql in new[]
+        {
+            "CREATE INDEX IF NOT EXISTS ix_med_concepts_hot ON med_concepts(deleted,id,type,name,name_norm,pinyin,initials,category,summary,source,edited);",
+            "CREATE INDEX IF NOT EXISTS ix_med_concepts_cat ON med_concepts(deleted,category);",
+            "CREATE INDEX IF NOT EXISTS ix_med_concepts_browse ON med_concepts(deleted,category,name,id,type,name_norm,pinyin,initials,summary,source,edited);",
+        })
+        {
+            try { using var cmd = Cmd(cn, sql); cmd.ExecuteNonQuery(); }
+            catch (Exception ex) { Log.Warn("[med] 索引创建失败: " + ex.Message); }
+        }
     }
 
     private static void Exec(SqliteConnection cn, string sql)
@@ -145,14 +165,12 @@ CREATE TABLE IF NOT EXISTS med_concepts (
     id TEXT PRIMARY KEY, type TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
     name_norm TEXT NOT NULL DEFAULT '', pinyin TEXT NOT NULL DEFAULT '', initials TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '', data_json TEXT NOT NULL DEFAULT '{}',
-    summary TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', source_version TEXT NOT NULL DEFAULT ''
+    summary TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', source_version TEXT NOT NULL DEFAULT '',
+    edited INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_med_concepts_norm ON med_concepts(name_norm);
 CREATE INDEX IF NOT EXISTS ix_med_concepts_init ON med_concepts(initials);
 CREATE INDEX IF NOT EXISTS ix_med_concepts_type ON med_concepts(type);
-CREATE INDEX IF NOT EXISTS ix_med_concepts_hot ON med_concepts(deleted,id,type,name,name_norm,pinyin,initials,category,summary,source,edited);
-CREATE INDEX IF NOT EXISTS ix_med_concepts_cat ON med_concepts(deleted,category);
-CREATE INDEX IF NOT EXISTS ix_med_concepts_browse ON med_concepts(deleted,category,name,id,type,name_norm,pinyin,initials,summary,source,edited);
 CREATE TABLE IF NOT EXISTS med_synonyms (
     term TEXT PRIMARY KEY, canonical_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'alias'
 );
