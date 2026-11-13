@@ -1,6 +1,6 @@
 import type {
   AppInfo, AppSettings, AudioMeta, BookDetail, Facets, FavoriteFolder, FontsDto, FsList, FsRoots, HashResult, ImagePage,
-  ImageItem, ImportResult, JobStatus, LibraryItem, LibraryPage, Lyrics, MacroList, MacroRecord, MediaProgressItem,
+  ImageItem, ImportResult, JobStatus, LibraryItem, LibraryPage, Lyrics, MacroGroup, MacroList, MacroRecord, MediaProgressItem,
   NoteView, PlaylistList, PlaylistRecord, PortItem, ProcessItem, SiteDownloadResult, SiteFetchResult, SiteHostInfo, SiteHostList, StatsDto,
   SystemInfo, ZipList,
 } from './types'
@@ -144,6 +144,9 @@ export const api = {
 
   // ---------- 按键精灵 ----------
   macros: () => apiGet<MacroList>('/api/macros'),
+  macroGroups: () => apiGet<MacroGroup[]>('/api/macros/groups'),
+  setMacroGroup: (name: string, enabled: boolean) =>
+    apiPost<MacroList>('/api/macros/groups', { name, enabled }),
   saveMacro: (rec: MacroRecord) => apiPost<MacroRecord>('/api/macros', rec),
   deleteMacro: (id: string) => apiDelete(`/api/macros/${encodeURIComponent(id)}`),
   runMacro: (id: string, leadIn?: number) =>

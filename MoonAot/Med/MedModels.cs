@@ -328,6 +328,7 @@ public class MedSearchDsl
     public List<string> Types { get; set; } = new();
     public List<string> Books { get; set; } = new();
     public List<string> Tags { get; set; } = new();
+    public bool FullText { get; set; }
     public int Limit { get; set; } = 50;
     public int Offset { get; set; }
 }
@@ -375,6 +376,8 @@ public class MedDocTemplateContent
 [JsonSerializable(typeof(List<MedQueryDto>))]
 [JsonSerializable(typeof(MedGraphDto))]
 [JsonSerializable(typeof(MedImportReportDto))]
+[JsonSerializable(typeof(MedRelink.Result))]
+[JsonSerializable(typeof(MedMineReportDto))]
 [JsonSerializable(typeof(MedJobDto))]
 [JsonSerializable(typeof(MedSuggestDto))]
 [JsonSerializable(typeof(MedExportDto))]

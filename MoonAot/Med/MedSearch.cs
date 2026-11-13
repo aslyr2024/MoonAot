@@ -107,6 +107,12 @@ ORDER BY b.added_at,c.ord,k.ord;
         var scope = dsl.Scope.Count > 0 ? new HashSet<string>(dsl.Scope, StringComparer.OrdinalIgnoreCase) : null;
         var books = dsl.Books.Count > 0 ? new HashSet<string>(dsl.Books, StringComparer.Ordinal) : null;
         int limit = Math.Clamp(dsl.Limit <= 0 ? 50 : dsl.Limit, 1, 300);
+        // 全文搜索：绕过概念卡与书籍/类型筛选，只对所有图书的 FTS5 原文段落做检索
+        if (dsl.FullText)
+        {
+            scope = new HashSet<string>(new[] { "chunk" }, StringComparer.OrdinalIgnoreCase);
+            books = null;
+        }
 
         // 空关键词：直接 SQL 分页浏览全部条目，避免把 3 万多条概念全部加载进内存再排序
         if (q.Length == 0)
@@ -167,7 +173,7 @@ ORDER BY b.added_at,c.ord,k.ord;
         string mode = "l2";
         var ftsGroups = groups
             .Select(g => g.Where(t => t.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(t => "\"" + t.Replace("\"", "\"\"") + "\"" + (dsl.Mode == "prefix" ? " *" : "")).ToList())
+                .Select(t => "\"" + t.Replace("\"", "\"\"") + "\"" + (dsl.Mode == "prefix" || dsl.FullText ? " *" : "")).ToList())
             .Where(g => g.Count > 0).ToList();
         if (ftsGroups.Count > 0 && (scope == null || scope.Contains("chunk")))
         {

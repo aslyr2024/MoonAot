@@ -643,6 +643,8 @@ public class MacroRecord
     public int LeadInMs { get; set; } = 1500;
     /// <summary>scan = 扫描码（游戏兼容更好）；virtual = 虚拟键。</summary>
     public string SendMode { get; set; } = "scan";
+    /// <summary>分组名；同一组的宏可由组开关统一启用/停用。</summary>
+    public string Group { get; set; } = "";
     public List<MacroStep> Steps { get; set; } = new();
     public long CreatedAt { get; set; }
     public long UpdatedAt { get; set; }
@@ -674,9 +676,17 @@ public class FavoriteFolder
 }
 
 /// <summary>按键精灵列表快照（含运行/录制状态与全局开关）。</summary>
+public class MacroGroupDto
+{
+    public string Name { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public int Count { get; set; }
+}
+
 public class MacroListDto
 {
     public List<MacroRecord> Items { get; set; } = new();
+    public List<MacroGroupDto> Groups { get; set; } = new();
     public bool GlobalEnabled { get; set; } = true;
     public bool Recording { get; set; }
     public bool Running { get; set; }

@@ -107,6 +107,7 @@ public sealed class Database
             EnsureColumn(cn, "app_settings", "browser_max", "INTEGER NOT NULL DEFAULT 0");
             EnsureColumn(cn, "media_progress", "scale", "REAL NOT NULL DEFAULT 1");
             EnsureColumn(cn, "media_progress", "rotation", "REAL NOT NULL DEFAULT 0");
+            EnsureColumn(cn, "macros", "group_name", "TEXT NOT NULL DEFAULT ''");
         }
     }
 
@@ -379,7 +380,13 @@ CREATE TABLE IF NOT EXISTS macros (
     lead_in_ms INTEGER NOT NULL DEFAULT 1500,
     send_mode TEXT NOT NULL DEFAULT 'scan',
     created_at INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT 0
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    group_name TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS macro_groups (
+    name TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS macro_steps (

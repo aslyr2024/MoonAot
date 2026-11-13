@@ -13,10 +13,11 @@ import { api } from '../api'
 import { host, onMacroEvent } from '../host'
 import { confirmDialog, toast, toastError } from '../ui'
 import { clamp } from '../utils'
-import type { MacroList, MacroRecord, MacroStep, MacroStepKind } from '../types'
+import type { MacroGroup, MacroList, MacroRecord, MacroStep, MacroStepKind } from '../types'
 
 const loading = ref(true)
 const macros = ref<MacroRecord[]>([])
+const groups = ref<MacroGroup[]>([])
 const globalEnabled = ref(true)
 const recording = ref(false)
 const running = ref(false)
@@ -250,7 +251,7 @@ function setDraft(rec: MacroRecord | null) {
 function newDraft(): MacroRecord {
   return {
     id: '', name: '新宏', enabled: true, triggerMode: 'hotkey', trigger: 'F1', repeat: 1,
-    repeatDelayMs: 500, leadInMs: 1500, sendMode: 'scan', steps: [], createdAt: 0, updatedAt: 0,
+    repeatDelayMs: 500, leadInMs: 1500, sendMode: 'scan', group: '', steps: [], createdAt: 0, updatedAt: 0,
   }
 }
 
@@ -259,6 +260,7 @@ async function load(initial = false) {
   try {
     const res: MacroList = await api.macros()
     macros.value = res.items
+    groups.value = res.groups || []
     globalEnabled.value = res.globalEnabled
     recording.value = res.recording
     running.value = res.running
@@ -315,6 +317,15 @@ async function newMacro() {
   selectedId.value = ''
   setDraft(newDraft())
   quickText.value = ''
+}
+
+async function toggleGroup(g: MacroGroup, enabled: boolean) {
+  try {
+    const res: MacroList = await api.setMacroGroup(g.name, enabled)
+    groups.value = res.groups || []
+    toast(enabled ? `已启用分组「${g.name}」` : `已停用分组「${g.name}」`)
+    setTimeout(() => { void refreshRegistration() }, 350)
+  } catch (e) { toastError(e); void load(false) }
 }
 
 async function saveMacro(): Promise<boolean> {
@@ -707,6 +718,15 @@ onBeforeUnmount(() => {
           <span>我的宏</span>
           <span class="muted">{{ macros.length }} 个</span>
         </div>
+        <div v-if="groups.length" class="macro-groups">
+          <div class="mg-title">分组 <span class="muted">{{ groups.length }} 组</span></div>
+          <div v-for="g in groups" :key="g.name" class="mg-row">
+            <n-switch :value="g.enabled" size="small" @update:value="toggleGroup(g, $event)" />
+            <span class="mg-name" :title="g.name">{{ g.name }}</span>
+            <span class="muted">{{ g.count }} 个宏</span>
+          </div>
+          <div class="mg-tip">关闭分组后，组内所有宏的热键都会停止注册</div>
+        </div>
         <div class="list-scroll">
           <button
             v-for="m in macros"
@@ -751,6 +771,7 @@ onBeforeUnmount(() => {
 
         <div class="editor-head">
           <n-input v-model:value="draft.name" class="name-input" placeholder="宏名称" />
+          <n-input v-model:value="draft.group" class="group-input" placeholder="分组名（留空=不分组）" />
           <n-tag v-if="dirty" type="warning" size="small" :bordered="false">未保存</n-tag>
           <div class="head-actions">
             <n-button type="primary" :loading="saveBusy" @click="saveMacro"><template #icon><save :size="15" /></template>保存</n-button>
@@ -996,6 +1017,12 @@ onBeforeUnmount(() => {
 .macro-layout { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: 268px minmax(0, 1fr); gap: 14px; }
 
 .macro-list { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.macro-groups { border-bottom: 1px solid var(--border); padding: 8px 10px 10px; flex: none; max-height: 168px; overflow-y: auto; }
+.mg-title { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-2); margin-bottom: 6px; }
+.mg-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 11.5px; color: var(--text-2); }
+.mg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mg-tip { font-size: 10.5px; color: var(--text-3); margin-top: 6px; line-height: 1.5; }
+.group-input { width: 190px; flex: none; }
 .list-head { flex: none; display: flex; justify-content: space-between; align-items: center; padding: 13px 14px 9px; font-size: 11px; letter-spacing: .06em; color: var(--text-3); text-transform: uppercase; }
 .list-head .muted { color: var(--text-3); }
 .list-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 9px 9px; display: flex; flex-direction: column; gap: 6px; }

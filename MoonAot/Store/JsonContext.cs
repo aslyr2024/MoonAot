@@ -68,6 +68,8 @@ namespace MoonAot.Store;
 [JsonSerializable(typeof(List<MacroStep>))]
 [JsonSerializable(typeof(MacroRecord))]
 [JsonSerializable(typeof(List<MacroRecord>))]
+[JsonSerializable(typeof(MacroGroupDto))]
+[JsonSerializable(typeof(List<MacroGroupDto>))]
 [JsonSerializable(typeof(MacroListDto))]
 [JsonSerializable(typeof(MoonAot.TinySearch.Storage.AppSettings), TypeInfoPropertyName = "TinyAppSettings")]
 [JsonSerializable(typeof(SystemInfoDto))]

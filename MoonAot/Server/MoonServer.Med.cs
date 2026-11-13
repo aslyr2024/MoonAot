@@ -29,7 +29,7 @@ public sealed partial class MoonServer
                     {
                         Version = MedStore.MedVersion,
                         NavItems = new List<string> { "全局搜索", "章节精读", "知识图谱", "收藏分类", "模板", "数据源" },
-                        CardTypes = new List<string> { "disease", "symptom", "drug", "lab", "procedure", "guideline", "document", "template", "leaflet" },
+                        CardTypes = new List<string> { "disease", "symptom", "drug", "lab", "procedure", "guideline", "document", "template", "leaflet", "yibao_drug", "yibao_herb", "yibao_icd" },
                         SourceKinds = new List<string> { "epub", "markdown", "clinical-json", "drug-leaflet" },
                         QuickActions = new List<string> { "添加书籍", "导入临床数据", "药品说明书", "保存检索模板", "新建注释", "重建索引" },
                     })); return;
@@ -54,6 +54,9 @@ public sealed partial class MoonServer
                                 dsl.Types = StrArray(r, "types");
                                 dsl.Books = StrArray(r, "books");
                                 dsl.Tags = StrArray(r, "tags");
+                                if (r.TryGetProperty("fullText", out var ft))
+                                    dsl.FullText = ft.ValueKind == JsonValueKind.True ||
+                                                   (ft.ValueKind == JsonValueKind.Number && ft.GetInt32() != 0);
                             }
                         }
                         else
@@ -263,6 +266,27 @@ public sealed partial class MoonServer
                     SendJsonString(ctx, 200, MedJson.S(MedStore.Export())); return;
                 case "reindex":
                     SendJsonString(ctx, 200, MedJson.S(MedImport.Reindex())); return;
+                case "relink":
+                    SendJsonString(ctx, 200, MedJson.S(MedRelink.Run())); return;
+                case "dictionary":
+                    {
+                        using var body = ReadJson(req);
+                        var root = body == null ? default : body.RootElement;
+                        SendJsonString(ctx, 200, MedJson.S(MedTermMiner.ImportDictionary(root))); return;
+                    }
+                case "mine":
+                    {
+                        using var body = ReadJson(req);
+                        var root = body == null ? default : body.RootElement;
+                        int top = int.TryParse(QueryValue(query, "top"), out var t) ? t : 800;
+                        int minDf = int.TryParse(QueryValue(query, "minDf"), out var d) ? d : 3;
+                        if (root.ValueKind == JsonValueKind.Object)
+                        {
+                            top = (int)Math.Clamp(GetLong(root, "top", top), 1, 3000);
+                            minDf = (int)Math.Clamp(GetLong(root, "minDf", minDf), 2, 50);
+                        }
+                        SendJsonString(ctx, 200, MedJson.S(MedTermMiner.Mine(top, minDf))); return;
+                    }
                 case "jobs":
                     {
                         var jid = FirstNonEmpty(QueryValue(query, "id"), id);

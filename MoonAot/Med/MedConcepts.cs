@@ -594,6 +594,40 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
 
     public static List<MedConceptDto> SearchLite(string q, int limit = 12) => SearchPage(q, limit, 0).Items;
 
+    private static bool FuzzyNear(string q, string name)
+    {
+        if (q.Length < 2 || q.Length > 12 || name.Length < 2 || name.Length > 40) return false;
+        int max = q.Length >= 4 ? 2 : 1;
+        if (Math.Abs(q.Length - name.Length) <= max && EditDistance(q, name, max) <= max) return true;
+        for (int len = Math.Max(2, q.Length - max); len <= Math.Min(name.Length, q.Length + max); len++)
+            for (int i = 0; i + len <= name.Length; i++)
+                if (EditDistance(q, name.Substring(i, len), max) <= max) return true;
+        return false;
+    }
+
+    /// <summary>带早停的编辑距离（超过 max 立即放弃），用于错别字/近形词召回。</summary>
+    private static int EditDistance(string a, string b, int max)
+    {
+        if (Math.Abs(a.Length - b.Length) > max) return max + 1;
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            int rowMin = cur[0];
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost);
+                if (cur[j] < rowMin) rowMin = cur[j];
+            }
+            if (rowMin > max) return max + 1;
+            (prev, cur) = (cur, prev);
+        }
+        return prev[b.Length];
+    }
+
     /// <summary>
     /// 概念卡服务端分页。召回同时覆盖：概念名、别名、keywords（症状/俗称）、拼音首字母；
     /// 排序按「匹配精度 → 书中命中次数 → 名称长度」，避免包含匹配按长度堆在前面。
@@ -646,6 +680,7 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
                 else if (py.Length >= 2 && c.Initials.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 1500;
                 else if (py.Length >= 3 && c.Pinyin.StartsWith(py, StringComparison.OrdinalIgnoreCase)) score = 1200;
                 else if (py.Length >= 2 && c.Pinyin.Contains(py, StringComparison.OrdinalIgnoreCase)) score = 800;
+                else if (FuzzyNear(norm, c.NameNorm)) score = 400; // 错别字/近形词兜底
             }
             if (score > 0)
                 scored.Add((score, _hitCounts.TryGetValue(c.Id, out var hc) ? hc : 0, c));

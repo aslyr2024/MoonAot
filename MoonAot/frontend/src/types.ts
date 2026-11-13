@@ -296,14 +296,22 @@ export interface MacroRecord {
   repeatDelayMs: number
   leadInMs: number
   sendMode: 'scan' | 'virtual'
+  group?: string
   steps: MacroStep[]
   createdAt: number
   updatedAt: number
   hotkeyError?: string | null
 }
 
+export interface MacroGroup {
+  name: string
+  enabled: boolean
+  count: number
+}
+
 export interface MacroList {
   items: MacroRecord[]
+  groups: MacroGroup[]
   globalEnabled: boolean
   recording: boolean
   running: boolean

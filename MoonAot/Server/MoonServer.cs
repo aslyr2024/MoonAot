@@ -991,7 +991,7 @@ public sealed partial class MoonServer
 #pragma warning restore IL3000
         return new AppInfoDto
         {
-            Version = "1.3.4",
+            Version = "1.3.6",
             DataDir = DbStore.Instance.DataDir,
             BaseUrl = BaseUrl,
             BookCount = DbStore.Instance.Count,
@@ -1218,10 +1218,15 @@ public sealed partial class MoonServer
 
     private void HandlePdfPrefs(HttpListenerContext ctx, string[] seg, HttpListenerRequest req)
     {
+        const string globalId = "__pdf_global__";
         if (req.HttpMethod == "GET")
         {
             var id = seg.Length > 1 ? seg[1] : QueryValue(req.Url?.Query ?? "", "bookId");
-            var prefs = string.IsNullOrEmpty(id) ? null : DbStore.Instance.GetConfig(id);
+            // 全局偏好优先：换书或重开时都读同一份设置，不再按 bookId 各自回到默认值
+            var global = DbStore.Instance.GetConfig(globalId);
+            var prefs = global != null && !string.IsNullOrEmpty(global.PdfLayout)
+                ? global
+                : (string.IsNullOrEmpty(id) ? null : DbStore.Instance.GetConfig(id));
             var sb = new StringBuilder();
             sb.Append("{\"bookId\":").Append(JsonStr(id))
               .Append(",\"pdfLayout\":").Append(JsonStr(prefs?.PdfLayout))
@@ -1245,6 +1250,13 @@ public sealed partial class MoonServer
             cfg.PdfAutoPage = ap.GetBoolean();
         cfg.UpdatedAt = DateTime.Now;
         DbStore.Instance.PutConfig(cfg);
+        // 同步写一份全局记录（保留其它字段），让新书/重开都继承本次设置
+        var g = DbStore.Instance.GetConfig(globalId) ?? new ConfigRecord { BookId = globalId };
+        g.PdfLayout = cfg.PdfLayout;
+        g.PdfZoom = cfg.PdfZoom;
+        g.PdfAutoPage = cfg.PdfAutoPage;
+        g.UpdatedAt = DateTime.Now;
+        DbStore.Instance.PutConfig(g);
         SendJson(ctx, 200, new OkDto { Ok = true });
     }
 
@@ -1601,6 +1613,7 @@ public sealed partial class MoonServer
         return new MacroListDto
         {
             Items = list,
+            Groups = MacroStore.Instance.ListGroups(),
             GlobalEnabled = MacroStore.Instance.GetGlobalEnabled(),
             Recording = MacroEngine.IsRecording,
             Running = MacroEngine.IsRunning,
@@ -1616,6 +1629,24 @@ public sealed partial class MoonServer
                 case "state" when req.HttpMethod == "GET":
                     SendJson(ctx, 200, MacroSnapshot());
                     return;
+                case "groups" when req.HttpMethod == "GET":
+                    SendJson(ctx, 200, MacroStore.Instance.ListGroups());
+                    return;
+                case "groups" when req.HttpMethod == "POST":
+                    {
+                        using var body = ReadJson(req);
+                        if (body == null) { SendText(ctx, 400, "body required"); return; }
+                        var r = body.RootElement;
+                        var name = GetString(r, "name") ?? "";
+                        bool enabled = true;
+                        if (r.TryGetProperty("enabled", out var e))
+                            enabled = e.ValueKind == JsonValueKind.True ||
+                                      (e.ValueKind == JsonValueKind.Number && e.GetInt32() != 0);
+                        var ok = MacroStore.Instance.SetGroupEnabled(name, enabled);
+                        MacroEngine.RequestReload();
+                        SendJson(ctx, ok ? 200 : 400, MacroSnapshot());
+                        return;
+                    }
                 case "stop" when req.HttpMethod == "POST":
                     MacroEngine.StopPlayback();
                     SendJson(ctx, 200, new OkDto { Ok = true });

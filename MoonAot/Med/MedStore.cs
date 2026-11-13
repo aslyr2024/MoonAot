@@ -18,7 +18,7 @@ public static class MedStore
 
     public const string FavoriteTagId = "med-favorite";
     /// <summary>医学助手版本，随应用版本一起发布；显示在页面标题与使用说明中。</summary>
-    public const string MedVersion = "1.3.4";
+    public const string MedVersion = "1.3.6";
 
     /// <summary>内置数据源默认位置（机器相关）；状态接口会返回是否存在，前端据此决定“一键导入”是否可用。</summary>
     public static readonly (string Path, string Volume)[] DefaultBookSources =
@@ -435,6 +435,7 @@ INSERT OR REPLACE INTO med_templates(id,kind,name,schema_json,content_json,pinne
 
     public static List<MedBookDto> Books()
     {
+        MedRelink.RunThrottled();
         var list = new List<MedBookDto>();
         using var cn = MedDatabase.Instance.Open();
         using var cmd = Cmd(cn, "SELECT * FROM med_books ORDER BY added_at DESC;");
@@ -607,6 +608,7 @@ SELECT DISTINCT h.concept_id FROM med_hits h WHERE h.chapter_id=$c ORDER BY h.tf
         var db = MedDatabase.Instance;
         db.Initialize();
         EnsureConceptTags();
+        MedRelink.RunThrottled();
         var s = new MedStatusDto
         {
             Ready = true, Version = MedVersion, DbPath = db.DbPath, DbBytes = db.DbBytes,

@@ -12,6 +12,8 @@ const emit = defineEmits<{
 const TYPE_LABEL: Record<string, string> = {
   disease: '疾病', symptom: '症状', drug: '药品', lab: '检验', procedure: '操作',
   guideline: '指南', document: '文书', template: '病历模板', leaflet: '说明书',
+  yibao_drug: '医保药品', yibao_herb: '医保中草药', yibao_icd: '医保ICD编码',
+  term: '术语', other: '其他',
 }
 const FIELD_LABEL: Record<string, string> = {
   summary: '概要', symptoms: '症状', diagnosis: '诊断', infusion: '输液方案',
@@ -32,7 +34,8 @@ const fields = computed(() => {
   try {
     const data = JSON.parse(props.concept.dataJson || '{}')
     return Object.entries(data)
-      .filter(([k, v]) => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0) && k !== 'pinyin')
+      .filter(([k, v]) => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0) &&
+        k !== 'pinyin' && !k.startsWith('_'))
       .slice(0, props.compact ? 4 : 14)
       .map(([k, v]) => ({ key: k, label: FIELD_LABEL[k] || k, value: Array.isArray(v) ? v : [String(v)] }))
   } catch { return [] }

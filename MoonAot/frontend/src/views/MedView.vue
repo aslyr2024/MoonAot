@@ -38,6 +38,7 @@ const graphQuery = ref('')
 const graphDepth = ref<1 | 2>(1)
 const activeTypes = ref<string[]>([])
 const activeBooks = ref<string[]>([])
+const fullText = ref(false)
 const showBookFilter = ref(false)
 const activeTag = ref('')
 const suggest = ref<MedConcept[]>([])
@@ -85,6 +86,8 @@ const TYPE_CHIPS = [
   { key: 'disease', label: '疾病' }, { key: 'symptom', label: '症状' }, { key: 'drug', label: '药品' },
   { key: 'lab', label: '检验' }, { key: 'procedure', label: '操作' }, { key: 'guideline', label: '指南' },
   { key: 'leaflet', label: '说明书' }, { key: 'template', label: '模板' },
+  { key: 'yibao_drug', label: '医保药品' }, { key: 'yibao_herb', label: '医保中草药' },
+  { key: 'yibao_icd', label: '医保ICD编码' },
 ]
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(TYPE_CHIPS.map(t => [t.key, t.label]))
 const anchorRate = computed(() => {
@@ -213,9 +216,11 @@ async function doSearch(text = q.value, keepPage = false) {
       q: text.trim(), offset: (page - 1) * size, limit: size,
       sort: sortMode.value, mode: 'phrase',
       types: activeTypes.value, books: activeBooks.value, tags: activeTag.value ? [activeTag.value] : [],
+      fullText: fullText.value,
     })
     result.value = r
     keyword.value = text.trim()
+    if (fullText.value) resultTab.value = 'hits'
     if (!keepPage) {
       const want = r.concepts.length ? 'cards' : (r.hits.length ? 'hits' : 'notes')
       if (want !== resultTab.value) {
@@ -321,6 +326,23 @@ function openCard(c: MedConcept) {
 async function openLeaflet(c: MedConcept) {
   try { leafletConcept.value = await med.concept(c.id) }
   catch { leafletConcept.value = c }
+}
+
+/** 医保药品详情页：data_json._leafletId 指向数据库里的药品说明书概念。 */
+const leafletRef = computed(() => {
+  const c = concept.value
+  if (!c || c.type !== 'yibao_drug') return null
+  try {
+    const d = JSON.parse(c.dataJson || '{}')
+    return d._leafletId ? { id: String(d._leafletId), name: String(d._leafletName || '药品说明书') } : null
+  } catch { return null }
+})
+
+async function openLinkedLeaflet() {
+  const r = leafletRef.value
+  if (!r) return
+  try { leafletConcept.value = await med.concept(r.id) }
+  catch (e) { toastError(e) }
 }
 
 function prettyJson(text: string) {
@@ -818,6 +840,9 @@ onBeforeUnmount(() => {
         <input ref="searchInput" v-model="q" class="med-search" placeholder="搜索疾病、症状、药品、检验、指南，或输入拼音首字母（如 xlsj）"
                @keydown.enter="doSearch()" @input="onInput" />
         <button class="med-go" @click="doSearch()">检索</button>
+        <label class="med-fulltext" title="勾选后跳过概念卡，直接检索全部图书的 FTS5 原文段落">
+          <input type="checkbox" v-model="fullText" @change="doSearch()" /> 全文搜索
+        </label>
         <button class="med-save-query" title="把当前检索条件保存为模板" @click="saveCurrentQuery">保存检索式</button>
         <div v-if="suggest.length && q" class="med-suggest">
           <button v-for="c in suggest" :key="c.id" @mousedown.prevent="doSearch(c.name)">
@@ -1004,6 +1029,7 @@ onBeforeUnmount(() => {
                 <MedCard :concept="concept" compact :q="q" :favorited="isFav('concept', concept!.id)" @search="doSearch"
                          @favorite="favorite('concept', concept!.id, concept!.name)" @graph="showGraph" @open-hit="openHit"
                          @open-term="openConcept" @open="openConcept(concept!.id)" />
+                <button v-if="leafletRef" class="med-btn primary" style="margin-top:8px;width:100%" @click="openLinkedLeaflet">数据库药品说明书 →</button>
               </div>
               <div class="med-side-sec">
                 <div class="med-sec-head"><span>本章目录</span><em>{{ chapter?.siblings.length || 0 }} 节</em></div>
@@ -1095,6 +1121,9 @@ onBeforeUnmount(() => {
                    @graph="showGraph" @open-hit="openHit" @open-term="openConcept" @open="openConcept(concept.id)" />
           <div v-else class="med-hint">点击检索结果中的概念卡查看结构、原文出处与相关条目。卡片本身可点击。</div>
           <button v-if="concept?.type === 'leaflet'" class="med-btn primary" style="margin-top:8px;width:100%" @click="openLeaflet(concept)">打开说明书</button>
+          <button v-if="leafletRef" class="med-btn primary" style="margin-top:8px;width:100%" @click="openLinkedLeaflet" :title="leafletRef.name">
+            数据库药品说明书 → {{ leafletRef.name }}
+          </button>
           <div v-if="concept" class="med-detail-actions">
             <button @click="editConcept(concept)">编辑</button>
             <button class="danger" @click="deleteConcept(concept)">删除</button>
@@ -1624,6 +1653,10 @@ onBeforeUnmount(() => {
 .med-resizer-right { left: calc(var(--med-left, 180px) + var(--med-mid, 520px) - 4px); }
 .med-body.is-reading .med-resizer-right { left: auto; right: calc(var(--med-right, 320px) - 4px); }
 .med-body.is-resizing { user-select: none; }
+
+/* 全文搜索勾选 */
+.med-fulltext { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; cursor: pointer; user-select: none; }
+.med-fulltext input { accent-color: var(--accent); cursor: pointer; }
 
 /* 原文段落：书籍多选筛选 */
 .med-book-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }

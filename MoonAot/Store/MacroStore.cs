@@ -78,10 +78,11 @@ public sealed class MacroStore
         SendMode = r.GetString(8),
         CreatedAt = r.GetInt64(9),
         UpdatedAt = r.GetInt64(10),
+        Group = r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetString(11) : "",
     };
 
     private const string MacroColumns =
-        "id,name,enabled,trigger_mode,trigger,repeat,repeat_delay_ms,lead_in_ms,send_mode,created_at,updated_at";
+        "id,name,enabled,trigger_mode,trigger,repeat,repeat_delay_ms,lead_in_ms,send_mode,created_at,updated_at,group_name";
 
     public List<MacroRecord> List()
     {
@@ -113,10 +114,57 @@ public sealed class MacroStore
 
     public List<MacroRecord> ListEnabled()
     {
-        var all = List();
+        var disabled = DisabledGroups();
         var result = new List<MacroRecord>();
-        foreach (var m in all) if (m.Enabled) result.Add(m);
+        foreach (var m in List())
+            if (m.Enabled && (m.Group.Length == 0 || !disabled.Contains(m.Group))) result.Add(m);
         return result;
+    }
+
+    private HashSet<string> DisabledGroups()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var cn = Database.Instance.Open();
+            using var cmd = Cmd(cn, "SELECT name FROM macro_groups WHERE enabled=0;");
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) set.Add(r.GetString(0));
+        }
+        catch { }
+        return set;
+    }
+
+    public List<MacroGroupDto> ListGroups()
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in List())
+        {
+            var g = (m.Group ?? "").Trim();
+            if (g.Length == 0) continue;
+            counts[g] = counts.TryGetValue(g, out var n) ? n + 1 : 1;
+        }
+        var disabled = DisabledGroups();
+        var list = new List<MacroGroupDto>();
+        foreach (var kv in counts)
+            list.Add(new MacroGroupDto { Name = kv.Key, Count = kv.Value, Enabled = !disabled.Contains(kv.Key) });
+        list.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+        return list;
+    }
+
+    public bool SetGroupEnabled(string name, bool enabled)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) return false;
+        try
+        {
+            using var cn = Database.Instance.Open();
+            using var cmd = Cmd(cn, "INSERT OR REPLACE INTO macro_groups(name,enabled) VALUES($n,$e);");
+            P(cmd, "$n", name); P(cmd, "$e", enabled ? 1 : 0);
+            cmd.ExecuteNonQuery();
+            return true;
+        }
+        catch (Exception ex) { Log.Warn("[macro] 分组开关失败: " + ex.Message); return false; }
     }
 
     public MacroRecord? Get(string id)
@@ -223,11 +271,12 @@ public sealed class MacroStore
             using var cn = Database.Instance.Open();
             using var tx = cn.BeginTransaction();
             using (var cmd = Cmd(cn, """
-INSERT INTO macros(id,name,enabled,trigger_mode,trigger,repeat,repeat_delay_ms,lead_in_ms,send_mode,created_at,updated_at)
-VALUES($id,$n,$e,$tm,$t,$rp,$rd,$li,$sm,$c,$u)
+INSERT INTO macros(id,name,enabled,trigger_mode,trigger,repeat,repeat_delay_ms,lead_in_ms,send_mode,created_at,updated_at,group_name)
+VALUES($id,$n,$e,$tm,$t,$rp,$rd,$li,$sm,$c,$u,$g)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,trigger_mode=excluded.trigger_mode,
 trigger=excluded.trigger,repeat=excluded.repeat,repeat_delay_ms=excluded.repeat_delay_ms,
-lead_in_ms=excluded.lead_in_ms,send_mode=excluded.send_mode,updated_at=excluded.updated_at;
+lead_in_ms=excluded.lead_in_ms,send_mode=excluded.send_mode,updated_at=excluded.updated_at,
+group_name=excluded.group_name;
 """, tx))
             {
                 P(cmd, "$id", rec.Id); P(cmd, "$n", rec.Name); P(cmd, "$e", rec.Enabled ? 1 : 0);
@@ -235,6 +284,7 @@ lead_in_ms=excluded.lead_in_ms,send_mode=excluded.send_mode,updated_at=excluded.
                 P(cmd, "$rp", rec.Repeat); P(cmd, "$rd", rec.RepeatDelayMs);
                 P(cmd, "$li", rec.LeadInMs); P(cmd, "$sm", rec.SendMode);
                 P(cmd, "$c", rec.CreatedAt); P(cmd, "$u", rec.UpdatedAt);
+                P(cmd, "$g", (rec.Group ?? "").Trim());
                 cmd.ExecuteNonQuery();
             }
             using (var del = Cmd(cn, "DELETE FROM macro_steps WHERE macro_id=$id;", tx))
